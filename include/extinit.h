@@ -30,6 +30,11 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #ifndef EXTINIT_H
 #define EXTINIT_H
 
+/* Newer xorgproto releases no longer provide this legacy declaration macro. */
+#ifndef INITARGS
+#define INITARGS void
+#endif
+
 #include "extnsionst.h"
 #include <X11/extensions/XIproto.h>
 

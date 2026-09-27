@@ -121,7 +121,7 @@ SOFTWARE.
  */
 
 
-#ifdef __arm32__
+#if defined(__arm32__) || defined(__aarch64__) || defined(__arm64__)
 
 #define IMAGE_BYTE_ORDER        LSBFirst
 
@@ -140,7 +140,7 @@ SOFTWARE.
 #define LARGE_INSTRUCTION_CACHE
 #define AVOID_MEMORY_READ
 
-#endif /* __arm32__ */
+#endif /* 32-bit or 64-bit ARM */
 
 #if defined(__powerpc__) || defined(__ppc__)
 
@@ -257,7 +257,8 @@ SOFTWARE.
 
 #endif /* mips */
 
-#if defined(__amd64__) || defined(amd64) || defined(__amd64)
+#if defined(__amd64__) || defined(amd64) || defined(__amd64) || \
+    defined(__x86_64__)
 # define IMAGE_BYTE_ORDER	LSBFirst
 
 # if defined(XF86MONOVGA) || defined(XF86VGA16) || defined(XF86MONO)

@@ -3,7 +3,9 @@
 This document is a companion to [the architecture tour](architecture.md). It
 follows the order in which the native TinyX executables are linked and explains
 what each archive contributes, which interfaces join it to its neighbors, and
-which external packages it brings into the final program.
+which external packages it brings into the final program. For the dependency
+graph organized around a future library boundary rather than link order, see
+[Finding the Embedding Boundaries](embedding-boundaries.md).
 
 The order is worth following because TinyX is assembled from static archives,
 not from independently versioned shared libraries. The boundaries are useful,

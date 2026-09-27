@@ -207,7 +207,11 @@ the final link may then optimize the selected LTO objects as a whole program.
 Without LTO, the same archive structure and ordering remain in effect.
 
 For an archive-by-archive account of these layers and the external packages
-they pull in, see [TinyX, Layer by Layer](layers.md).
+they pull in, see [TinyX, Layer by Layer](layers.md). For a source-level
+dependency graph and an analysis of the input, display, and protocol seams,
+see [Finding the Embedding Boundaries](embedding-boundaries.md). The
+mechanically generated object and archive dependency reports are documented in
+[Auditing TinyX Symbol Dependencies](symbol-dependencies.md).
 
 ## 4. The central object model
 

@@ -39,6 +39,9 @@ dnl kdrive-config.h covers the kdrive DDX
 AC_CONFIG_HEADERS(include/kdrive-config.h)
 
 AC_PROG_CC
+# TinyX still contains K&R-style definitions that are rejected by C23. Newer
+# Autoconf releases otherwise select the newest compiler dialect available.
+AX_CHECK_COMPILE_FLAG([-std=gnu99], [CFLAGS="$CFLAGS -std=gnu99"])
 AM_PROG_CC_C_O
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 AM_PROG_AS
@@ -222,6 +225,9 @@ AC_ARG_ENABLE(werror,        AS_HELP_STRING([--enable-werror],
 AC_ARG_ENABLE(debug,         AS_HELP_STRING([--enable-debug],
 				  [Enable debugging (default: disabled)]),
 			        [DEBUGGING=$enableval], [DEBUGGING=no])
+AC_ARG_ENABLE(lto,           AS_HELP_STRING([--disable-lto],
+				  [Disable link-time optimization (default: enabled when supported)]),
+			        [LTO=$enableval], [LTO=yes])
 AC_ARG_WITH(int10,           AS_HELP_STRING([--with-int10=BACKEND], [int10 backend: vm86, x86emu or stub]),
 				[INT10="$withval"],
 				[INT10="$DEFAULT_INT10"])
@@ -585,10 +591,15 @@ AC_DEFINE(XResExtension, 1, [Build XRes extension])
 
 dnl ---------- Compiler arguments
 
-AX_CHECK_COMPILE_FLAG([-flto],
-	[CFLAGS="$CFLAGS -flto"; LDFLAGS="$LDFLAGS -flto"; ac_cv_lto_supported=yes],
-	[ac_cv_lto_supported=no],
-	[])
+if test x"$LTO" = xyes; then
+	AX_CHECK_COMPILE_FLAG([-flto],
+		[CFLAGS="$CFLAGS -flto"; LDFLAGS="$LDFLAGS -flto"; ac_cv_lto_supported=yes],
+		[ac_cv_lto_supported=no],
+		[])
+else
+	ac_cv_lto_supported=no
+	AC_MSG_NOTICE([LTO disabled])
+fi
 
 if test x"$ac_cv_lto_supported" = xno; then
 	AC_MSG_NOTICE([LTO not supported, checking sections instead...])
