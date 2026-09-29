@@ -43,9 +43,12 @@ protocol semantics and server state.
 - **Phase 6 complete:** hosts can inject absolute or relative pointer motion,
   button transitions, and X keycode transitions without descriptors; events
   retain the ordinary KDrive, MI, and DIX path and wake cooperative hosts.
-- **Temporary font configuration:** `--disable-fonts` permits build and link
-  validation without libXfont. It intentionally cannot complete server
-  startup and will be replaced in phase 7.
+- **Phase 7 designed:** [Phase 7 Font Architecture](font-design.md) selects a
+  small embedded bitmap-font FPE for filesystem-free `fixed` and `cursor`
+  support while retaining libXfont as the native compatibility backend.
+- **Temporary font configuration:** `--disable-fonts` currently permits build
+  and link validation without libXfont, but cannot complete server startup.
+  Phase 7 will turn this configuration into the runnable embedded backend.
 
 ## Guiding principles
 
@@ -403,6 +406,17 @@ and clearly document unsupported font requests.
 - native font behavior is preserved where practical;
 - unsupported font operations fail through X11 semantics rather than crashing
   or terminating the host.
+
+### Design
+
+[Phase 7 Font Architecture](font-design.md) records the selected design and
+implementation slices. The embedded configuration will use checked-in,
+development-time-generated bitmap data behind a synchronous `built-ins` FPE.
+It will materialize ordinary `FontRec` instances, preserving DIX font
+resources, protocol operations, FB text rendering, and glyph cursors without
+a runtime parser or filesystem. Native builds retain the existing libXfont
+font-file behavior. No public host font-provider API is introduced before the
+Phase 8 facade defines ownership and reentrancy rules.
 
 ## Phase 8: Define the public embedding API
 
