@@ -1,5 +1,10 @@
 noinst_LTLIBRARIES = libos.la
 
+check_PROGRAMS = host-runtime-test
+TESTS = $(check_PROGRAMS)
+host_runtime_test_SOURCES = tests/host-runtime.c
+host_runtime_test_LDADD = libos.la
+
 AM_CFLAGS = $(DIX_CFLAGS)
 
 XDMCP_SOURCES = xdmcp.c
@@ -11,6 +16,7 @@ libos_la_SOURCES = 	\
 	access.c	\
 	auth.c		\
 	connection.c	\
+	host.c		\
 	io.c		\
 	memory.c	\
 	mitauth.c	\

@@ -835,8 +835,29 @@ typedef struct _KdOsFuncs {
 APM, and console ownership. It installs the table through the global
 `OsVendorInit()` hook called by `OsInit()`.
 
-This interface does not cover network clients, the dispatcher, clocks,
-filesystem access, or logging. Those remain in the broader OS layer.
+This interface does not cover network clients, the dispatcher, filesystem
+access, or the core runtime services. Those remain in the broader OS layer.
+
+### Core host runtime services
+
+`TinyXHostOps` is a separate singleton interface for facilities needed by the
+host-independent core: a monotonic millisecond clock, diagnostic logging, and
+a host wakeup notification. Native execution is the default and retains the
+system monotonic clock, stderr output, and existing process behavior. A custom
+in-process host can supply callbacks before initializing the server.
+
+All scheduling timestamps obtained through `GetTimeInMillis()` are delegated
+to this clock. Changing the earliest timer deadline, feeding or closing a memory client, or
+relieving its output backpressure requests a host wakeup. The wakeup is only
+a notification: the host remains responsible for deciding when to call the
+nonblocking server step.
+
+Fatal errors use an explicit poisoned-server policy. Custom hosts invoke core
+operations through `TinyXHostRunProtected()`. `FatalError()` logs and records
+the diagnostic, poisons the singleton, and unwinds to that boundary rather
+than returning through an invalid core stack or terminating the host process.
+The poisoned singleton cannot process further operations. Native calls retain
+the traditional DDX cleanup and process termination behavior.
 
 ### Shadow framebuffers
 
@@ -958,10 +979,15 @@ Examples include:
 
 The least abstract portions include:
 
-- Xtrans calls and file descriptors in `os/connection.c` and `os/io.c`;
-- `fd_set` and `select()` state in `os/WaitFor.c`;
+- native Xtrans calls and descriptor bookkeeping in the Xtrans connection
+  adapter;
+- `fd_set` and `select()` state in the native wait path in `os/WaitFor.c`;
 - process and filesystem setup in `os/osinit.c` and `os/utils.c`;
-- the combined process lifecycle in `dix/main.c`.
+- native DDX hooks selected as required global symbols.
+
+The reusable lifecycle and dispatch code no longer own the process entry
+point, blocking waits, byte-stream implementation, monotonic clock, logging,
+or fatal process policy.
 
 The architecture is therefore modular, but not organized around one uniform
 host interface.

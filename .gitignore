@@ -27,6 +27,9 @@ install-sh
 libtool
 ltmain.sh
 missing
+test-driver
+*.trs
+test-suite.log
 xorg-server.pc
 stamp-h?
 do-not-use-config.h

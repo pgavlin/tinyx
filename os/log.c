@@ -91,6 +91,7 @@ OR PERFORMANCE OF THIS SOFTWARE.
 
 #include "site.h"
 #include "opaque.h"
+#include "tinyx-host.h"
 
 #ifdef __GNUC__
 static void AbortServer(void) __attribute__((noreturn));
@@ -148,6 +149,11 @@ VAuditF(const char *f, va_list args)
     char *prefix;
     char buf[1024];
 
+    if (TinyXHostHasCustomOps()) {
+        TinyXHostVLog(TINYX_HOST_LOG_AUDIT, f, args);
+        return;
+    }
+
     prefix = AuditPrefix();
     vsnprintf(buf, sizeof(buf), f, args);
 
@@ -166,6 +172,15 @@ FatalError(const char *f, ...)
 {
     va_list args;
 
+    if (TinyXHostHasCustomOps()) {
+        char message[1024];
+
+        va_start(args, f);
+        vsnprintf(message, sizeof(message), f, args);
+        va_end(args);
+        TinyXHostFatal(message);
+    }
+
     ErrorF("\nFatal server error:\n");
 
     va_start(args, f);
@@ -180,7 +195,7 @@ FatalError(const char *f, ...)
 _X_EXPORT void
 VErrorF(const char *f, va_list args)
 {
-    vfprintf(stderr, f, args);
+    TinyXHostVLog(TINYX_HOST_LOG_ERROR, f, args);
 }
 
 _X_EXPORT void

@@ -68,6 +68,7 @@ SOFTWARE.
 #include <X11/Xpoll.h>
 #include "dixstruct.h"
 #include "opaque.h"
+#include "tinyx-host.h"
 #ifdef DPMSExtension
 #include "dpmsproc.h"
 #endif
@@ -108,6 +109,13 @@ struct _OsTimerRec {
 static void DoTimer(OsTimerPtr timer, CARD32 now, OsTimerPtr *prev);
 static void CheckAllTimers(CARD32 now);
 static OsTimerPtr timers = NULL;
+
+static void
+NotifyTimerChange(OsTimerPtr oldFirst, CARD32 oldExpires)
+{
+    if (timers != oldFirst || (timers && timers->expires != oldExpires))
+        TinyXHostWakeup();
+}
 
 /*****************
  * WaitForSomething:
@@ -482,6 +490,8 @@ TimerSet(OsTimerPtr timer, int flags, CARD32 millis,
     OsTimerCallback func, pointer arg)
 {
     OsTimerPtr *prev;
+    OsTimerPtr oldFirst = timers;
+    CARD32 oldExpires = oldFirst ? oldFirst->expires : 0;
     CARD32 now = GetTimeInMillis();
 
     if (!timer)
@@ -503,8 +513,10 @@ TimerSet(OsTimerPtr timer, int flags, CARD32 millis,
 	    }
 	}
     }
-    if (!millis)
+    if (!millis) {
+        NotifyTimerChange(oldFirst, oldExpires);
 	return timer;
+    }
     if (flags & TimerAbsolute) {
         timer->delta = millis - now;
     }
@@ -519,8 +531,10 @@ TimerSet(OsTimerPtr timer, int flags, CARD32 millis,
     {
 	timer->next = NULL;
 	millis = (*timer->callback)(timer, now, timer->arg);
-	if (!millis)
+	if (!millis) {
+            NotifyTimerChange(oldFirst, oldExpires);
 	    return timer;
+        }
     }
     for (prev = &timers;
 	 *prev && (int) ((*prev)->expires - millis) <= 0;
@@ -528,6 +542,7 @@ TimerSet(OsTimerPtr timer, int flags, CARD32 millis,
         ;
     timer->next = *prev;
     *prev = timer;
+    NotifyTimerChange(oldFirst, oldExpires);
     return timer;
 }
 
@@ -535,12 +550,15 @@ Bool
 TimerForce(OsTimerPtr timer)
 {
     OsTimerPtr *prev;
+    OsTimerPtr oldFirst = timers;
+    CARD32 oldExpires = oldFirst ? oldFirst->expires : 0;
 
     for (prev = &timers; *prev; prev = &(*prev)->next)
     {
 	if (*prev == timer)
 	{
 	    DoTimer(timer, GetTimeInMillis(), prev);
+            NotifyTimerChange(oldFirst, oldExpires);
 	    return TRUE;
 	}
     }
@@ -552,6 +570,8 @@ _X_EXPORT void
 TimerCancel(OsTimerPtr timer)
 {
     OsTimerPtr *prev;
+    OsTimerPtr oldFirst = timers;
+    CARD32 oldExpires = oldFirst ? oldFirst->expires : 0;
 
     if (!timer)
 	return;
@@ -563,6 +583,7 @@ TimerCancel(OsTimerPtr timer)
 	    break;
 	}
     }
+    NotifyTimerChange(oldFirst, oldExpires);
 }
 
 _X_EXPORT void

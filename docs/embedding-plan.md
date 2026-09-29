@@ -33,6 +33,10 @@ protocol semantics and server state.
   nonblocking byte-stream interface; Xtrans is an adapter; descriptor-free
   memory clients can feed and drain arbitrary chunks through the same DIX
   connection handshake and dispatch path.
+- **Phase 4 complete:** monotonic time, logging, and host wakeups use explicit
+  runtime operations; native process behavior remains the default; custom
+  hosts can run core calls inside a fatal-error boundary that poisons and
+  unwinds the singleton instead of terminating the process.
 - **Temporary font configuration:** `--disable-fonts` permits build and link
   validation without libXfont. It intentionally cannot complete server
   startup and will be replaced in phase 7.
@@ -243,6 +247,26 @@ turning the runtime operations into an unbounded collection of callbacks.
 - all scheduling timestamps derive from an explicit monotonic clock;
 - native behavior is supplied by a native `TinyXHostOps` implementation;
 - an in-process host can observe failures without being terminated.
+
+### Implemented
+
+`include/tinyx-host.h` defines the provisional singleton runtime contract.
+Every `GetTimeInMillis()` caller now obtains time through the configured
+monotonic clock, `ErrorF()` and `AuditF()` route messages to the host logger,
+and memory-client activity invokes the optional wakeup callback. The default
+implementation preserves the native clock, stderr/audit formatting, process
+cleanup, and termination behavior.
+
+Custom hosts run lifecycle or dispatch calls with `TinyXHostRunProtected()`.
+A `FatalError()` inside that boundary records the diagnostic, marks the server
+poisoned, and unwinds to the caller. It never returns into the failed core
+operation. A poisoned singleton cannot be entered again and must currently be
+abandoned; recovery and resource reclamation will be wrapped by the phase 8
+public facade. This policy is deliberately non-reentrant and non-thread-safe.
+Calling a fatal core path with custom operations but without a protected
+boundary aborts, because returning from `FatalError()` would be unsafe.
+
+Font and filesystem acquisition remain separate from this runtime contract.
 
 ## Phase 5: Add a memory display and presentation boundary
 

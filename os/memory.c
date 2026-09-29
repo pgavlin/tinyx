@@ -11,6 +11,7 @@
 #include "osdep.h"
 #include "opaque.h"
 #include "tinyx-memory.h"
+#include "tinyx-host.h"
 #include "transport.h"
 
 struct TinyXMemoryClient {
@@ -143,6 +144,7 @@ TinyXMemoryClientFeed(TinyXMemoryClient *memory, const void *data, size_t size)
         memcpy(memory->input + memory->inputCount, data, size);
         memory->inputCount += size;
         OsCommSetInputReady(memory->osComm, TRUE);
+        TinyXHostWakeup();
     }
     return 1;
 }
@@ -159,8 +161,10 @@ TinyXMemoryClientDrain(TinyXMemoryClient *memory, void *data, size_t size)
     memory->outputCount -= count;
     if (memory->outputCount)
         memmove(memory->output, memory->output + count, memory->outputCount);
-    if (count && memory->osComm)
+    if (count && memory->osComm) {
         OsCommNotifyWritable(memory->osComm);
+        TinyXHostWakeup();
+    }
     return count;
 }
 
@@ -170,8 +174,10 @@ TinyXMemoryClientCloseInput(TinyXMemoryClient *memory)
     if (!memory || memory->inputClosed)
         return;
     memory->inputClosed = TRUE;
-    if (memory->osComm)
+    if (memory->osComm) {
         OsCommSetInputReady(memory->osComm, TRUE);
+        TinyXHostWakeup();
+    }
 }
 
 int

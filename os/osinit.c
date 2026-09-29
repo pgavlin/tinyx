@@ -53,6 +53,7 @@ SOFTWARE.
 #include <X11/X.h>
 #include "os.h"
 #include "osdep.h"
+#include "tinyx-host.h"
 #include <X11/Xos.h>
 
 #ifdef SMART_SCHEDULE
@@ -94,6 +95,7 @@ OsInit(void)
 
 
     if (!been_here) {
+        if (!TinyXHostHasCustomOps()) {
 	fclose(stdin);
 	fclose(stdout);
 	/*
@@ -176,6 +178,7 @@ OsInit(void)
 	}
 #endif
 	LockServer();
+        }
 	been_here = TRUE;
     }
     TimerInit();
@@ -192,7 +195,7 @@ OsInit(void)
 void
 OsCleanup(Bool terminating)
 {
-    if (terminating)
+    if (terminating && !TinyXHostHasCustomOps())
     {
 	UnlockServer();
     }

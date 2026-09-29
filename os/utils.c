@@ -93,6 +93,7 @@ OR PERFORMANCE OF THIS SOFTWARE.
 #endif
 
 #include "opaque.h"
+#include "tinyx-host.h"
 
 #ifdef SMART_SCHEDULE
 #include "dixstruct.h"
@@ -377,16 +378,7 @@ GiveUp(int sig)
 _X_EXPORT CARD32
 GetTimeInMillis(void)
 {
-    struct timeval tv;
-
-#ifdef MONOTONIC_CLOCK
-    struct timespec tp;
-    if (clock_gettime(CLOCK_MONOTONIC, &tp) == 0)
-        return (tp.tv_sec * 1000) + (tp.tv_nsec / 1000000L);
-#endif
-
-    X_GETTIMEOFDAY(&tv);
-    return(tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+    return (CARD32)TinyXHostMonotonicTimeMillis();
 }
 
 _X_EXPORT void
