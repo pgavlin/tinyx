@@ -99,6 +99,7 @@ SOFTWARE.
 #include <X11/Xpoll.h>
 #include "opaque.h"
 #include "dixstruct.h"
+#include "tinyx-host.h"
 
 #define Pid_t pid_t
 
@@ -226,6 +227,10 @@ CreateWellKnownSockets(void)
     for (i=0; i<MaxClients; i++) ConnectionTranslation[i] = 0;
 
     FD_ZERO (&WellKnownConnections);
+
+    /* Embedded hosts use descriptor-free logical clients only. */
+    if (TinyXHostHasCustomOps())
+        return;
 
     sprintf (port, "%d", atoi (display));
 

@@ -31,6 +31,7 @@ typedef struct {
  * Callbacks must not reenter the server.
  */
 int TinyXInputSetHostOps(const TinyXInputHostOps *ops, void *userdata);
+void TinyXInputClearHostOpsAfterFatal(void);
 
 /*
  * Inject root-screen coordinates or relative deltas. Relative motion passes

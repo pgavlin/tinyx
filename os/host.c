@@ -38,7 +38,7 @@ NativeMonotonicTimeMillis(void)
 int
 TinyXHostSetOps(const TinyXHostOps *ops, void *userdata)
 {
-    if (boundaryActive || poisoned || (ops && !ops->monotonicTimeMillis))
+    if (boundaryActive || poisoned)
         return 0;
 
     if (ops) {
@@ -58,7 +58,7 @@ TinyXHostSetOps(const TinyXHostOps *ops, void *userdata)
 uint32_t
 TinyXHostMonotonicTimeMillis(void)
 {
-    if (customHost)
+    if (customHost && hostOps.monotonicTimeMillis)
         return hostOps.monotonicTimeMillis(hostData);
     return NativeMonotonicTimeMillis();
 }
@@ -151,6 +151,15 @@ const char *
 TinyXHostLastError(void)
 {
     return lastError[0] ? lastError : NULL;
+}
+
+void
+TinyXHostClearCallbacksAfterFatal(void)
+{
+    if (!poisoned)
+        return;
+    memset(&hostOps, 0, sizeof(hostOps));
+    hostData = NULL;
 }
 
 void

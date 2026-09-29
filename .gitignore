@@ -36,6 +36,9 @@ do-not-use-config.h
 do-not-use-config.h.in
 kdrive/fbdev/Xfbdev
 kdrive/memory/Xmemory
+kdrive/memory/tinyx-api-test
+kdrive/memory/tinyx-api-test.log
+kdrive/memory/tinyx-embed-example
 kdrive/vesa/Xvesa
 dix/embedded-font-data-test
 dix/embedded-font-data-test.log

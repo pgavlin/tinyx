@@ -18,6 +18,7 @@ struct TinyXMemoryClient {
     unsigned char *input;
     size_t inputCount;
     size_t inputCapacity;
+    size_t inputLimit;
     unsigned char *output;
     size_t outputCount;
     size_t outputCapacity;
@@ -113,13 +114,14 @@ static const TinyXTransportOps memoryOps = {
 };
 
 TinyXMemoryClient *
-TinyXMemoryClientOpen(size_t outputLimit)
+TinyXMemoryClientOpenWithLimits(size_t inputLimit, size_t outputLimit)
 {
     TinyXMemoryClient *memory = calloc(1, sizeof(*memory));
     ClientPtr client;
 
     if (!memory)
         return NULL;
+    memory->inputLimit = inputLimit;
     memory->outputLimit = outputLimit;
     client = AllocNewConnection(&memoryOps, memory, NULL, -1,
                                 GetTimeInMillis());
@@ -131,22 +133,51 @@ TinyXMemoryClientOpen(size_t outputLimit)
     return memory;
 }
 
-int
-TinyXMemoryClientFeed(TinyXMemoryClient *memory, const void *data, size_t size)
+TinyXMemoryClient *
+TinyXMemoryClientOpen(size_t outputLimit)
 {
-    if (!memory || memory->inputClosed || memory->serverClosed ||
-        size > (size_t)-1 - memory->inputCount)
+    return TinyXMemoryClientOpenWithLimits(0, outputLimit);
+}
+
+int
+TinyXMemoryClientFeedPartial(TinyXMemoryClient *memory, const void *data,
+                             size_t size, size_t *accepted)
+{
+    size_t count = size;
+
+    if (accepted)
+        *accepted = 0;
+    if (!memory || !accepted || (size && !data) || memory->inputClosed ||
+        memory->serverClosed)
         return 0;
-    if (size && !GrowBuffer(&memory->input, &memory->inputCapacity,
-                            memory->inputCount + size))
+    if (memory->inputLimit) {
+        if (memory->inputCount >= memory->inputLimit)
+            count = 0;
+        else if (count > memory->inputLimit - memory->inputCount)
+            count = memory->inputLimit - memory->inputCount;
+    }
+    if (count > (size_t)-1 - memory->inputCount)
         return 0;
-    if (size) {
-        memcpy(memory->input + memory->inputCount, data, size);
-        memory->inputCount += size;
+    if (count && !GrowBuffer(&memory->input, &memory->inputCapacity,
+                             memory->inputCount + count))
+        return 0;
+    if (count) {
+        memcpy(memory->input + memory->inputCount, data, count);
+        memory->inputCount += count;
         OsCommSetInputReady(memory->osComm, TRUE);
         TinyXHostWakeup();
     }
+    *accepted = count;
     return 1;
+}
+
+int
+TinyXMemoryClientFeed(TinyXMemoryClient *memory, const void *data, size_t size)
+{
+    size_t accepted;
+
+    return TinyXMemoryClientFeedPartial(memory, data, size, &accepted) &&
+        accepted == size;
 }
 
 size_t
@@ -168,6 +199,12 @@ TinyXMemoryClientDrain(TinyXMemoryClient *memory, void *data, size_t size)
     return count;
 }
 
+size_t
+TinyXMemoryClientOutputPending(const TinyXMemoryClient *memory)
+{
+    return memory ? memory->outputCount : 0;
+}
+
 void
 TinyXMemoryClientCloseInput(TinyXMemoryClient *memory)
 {
@@ -187,6 +224,16 @@ TinyXMemoryClientIsClosed(const TinyXMemoryClient *memory)
 }
 
 void
+TinyXMemoryClientAbandon(TinyXMemoryClient *memory)
+{
+    if (!memory)
+        return;
+    free(memory->input);
+    free(memory->output);
+    free(memory);
+}
+
+void
 TinyXMemoryClientDestroy(TinyXMemoryClient *memory)
 {
     if (!memory)
@@ -196,7 +243,5 @@ TinyXMemoryClientDestroy(TinyXMemoryClient *memory)
         if (client)
             CloseDownClient(client);
     }
-    free(memory->input);
-    free(memory->output);
-    free(memory);
+    TinyXMemoryClientAbandon(memory);
 }

@@ -40,6 +40,7 @@ libdix_la_SOURCES = 	\
 	lifecycle.c	\
 	lifecycle.h	\
 	main.c		\
+	main-entry.c	\
 	pixmap.c	\
 	privates.c	\
 	property.c	\

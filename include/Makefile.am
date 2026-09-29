@@ -1,5 +1,7 @@
 AM_CFLAGS = $(DIX_CFLAGS)
 
+include_HEADERS = tinyx.h
+
 EXTRA_DIST = do-not-use-config.h dix-config.h \
 	closestr.h closure.h colormap.h colormapst.h cursor.h cursorstr.h \
 	dix-config.h dix-config.h.in dixevents.h dixfont.h dixfontstr.h dixgrabs.h \

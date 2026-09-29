@@ -26,8 +26,9 @@ typedef struct {
 typedef void (*TinyXHostOperation)(void *closure);
 
 /*
- * Select host-provided services.  monotonicTimeMillis is required. Passing
- * NULL restores the native process implementation. The table is copied; the
+ * Select host-provided services. A missing monotonicTimeMillis callback uses
+ * the native clock. Passing NULL restores the native process implementation.
+ * The table is copied; the
  * userdata remains borrowed. Configuration must be performed while no
  * protected operation is active and cannot be changed after a fatal error.
  */
@@ -49,6 +50,8 @@ int TinyXHostRunProtected(TinyXHostOperation operation, void *closure);
 int TinyXHostIsPoisoned(void);
 int TinyXHostHasCustomOps(void);
 const char *TinyXHostLastError(void);
+/* Drop borrowed callback data after poisoning without clearing the poison. */
+void TinyXHostClearCallbacksAfterFatal(void);
 
 /* Called only by FatalError; it does not return. */
 void TinyXHostFatal(const char *message);

@@ -12,14 +12,20 @@ typedef struct TinyXMemoryClient TinyXMemoryClient;
  * that many unread output bytes are queued.
  */
 TinyXMemoryClient *TinyXMemoryClientOpen(size_t outputLimit);
+TinyXMemoryClient *TinyXMemoryClientOpenWithLimits(size_t inputLimit,
+                                                   size_t outputLimit);
 
 /* Append an arbitrary fragment of client-to-server protocol bytes. */
 int TinyXMemoryClientFeed(TinyXMemoryClient *client, const void *data,
                           size_t size);
+/* Copy the prefix that fits; accepted is zero when the input queue is full. */
+int TinyXMemoryClientFeedPartial(TinyXMemoryClient *client, const void *data,
+                                 size_t size, size_t *accepted);
 
 /* Drain up to size server-to-client bytes. Returns the number copied. */
 size_t TinyXMemoryClientDrain(TinyXMemoryClient *client, void *data,
                               size_t size);
+size_t TinyXMemoryClientOutputPending(const TinyXMemoryClient *client);
 
 /* Signal end-of-input. Queued input is consumed before the client closes. */
 void TinyXMemoryClientCloseInput(TinyXMemoryClient *client);
@@ -29,5 +35,7 @@ int TinyXMemoryClientIsClosed(const TinyXMemoryClient *client);
 
 /* Release the handle after it is closed and all desired output is drained. */
 void TinyXMemoryClientDestroy(TinyXMemoryClient *client);
+/* Release only transport storage after a fatal error; never enters DIX. */
+void TinyXMemoryClientAbandon(TinyXMemoryClient *client);
 
 #endif /* TINYX_MEMORY_H */

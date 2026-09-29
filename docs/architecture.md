@@ -895,6 +895,35 @@ the core does not choose an audio or physical LED implementation. Native Linux
 input acquisition continues to call the same lower-level KDrive enqueue
 functions.
 
+### Public embedding facade
+
+`include/tinyx.h` is the versioned host-facing API over these internal seams.
+It contains only opaque server and client handles, fixed-width values, buffer
+descriptions, status values, and callbacks; no DIX, KDrive, Xtrans, or native
+OS structures cross the boundary. API v1 permits one server lifetime and one
+generation per process or WASM module and is non-thread-safe and
+non-reentrant.
+
+`kdrive/memory/api.c` configures the host runtime, memory display, memory input
+devices, embedded fonts, and descriptor-free clients, then enters lifecycle
+and dispatch operations through the protected fatal-error boundary. Public
+client stream names use the client's perspective: `tinyx_client_send()` moves
+bytes to the server and may accept a bounded prefix, while
+`tinyx_client_receive()` drains server output. Both queues are finite.
+
+The framebuffer is exposed as read-only host data in native-endian depth-24,
+32-bpp words. Damage consumption, pointer and key injection, scheduling
+results, and callback lifetime are all represented without server internals.
+`kdrive/memory/embed-example.c` demonstrates startup and shutdown using only
+the public header, and `api-test.c` drives an X11 setup handshake through the
+facade.
+
+The native process entry point now occupies its own `libdix` archive member.
+Native executables pull that member to obtain `main()`, whereas an embedded
+host supplies its own entry point without also pulling the native lifecycle
+driver. A configured custom host also skips Xtrans listener creation; native
+hosts retain it.
+
 ### Shadow framebuffers
 
 `miext/shadow/` supports rendering into shadow memory and copying transformed
@@ -1107,6 +1136,8 @@ TinyX has a layered architecture inherited from the traditional X server:
 
 The most important architectural idea is that rendering behavior is assembled
 through object function tables, while client processing is assembled through
-request vectors and the OS scheduler. The code already contains meaningful
-abstraction boundaries, but process lifecycle and client I/O remain tightly
-coupled to the native singleton server.
+request vectors and the OS scheduler. The public embedding facade now composes
+host-independent lifecycle, client-stream, display, input, font, and runtime
+boundaries. The implementation remains a process-global singleton internally;
+multiple instances and thread safety require a separate state-isolation
+project.

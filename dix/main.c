@@ -88,7 +88,6 @@ Equipment Corporation.
 #include "gcstruct.h"
 #include "opaque.h"
 #include "servermd.h"
-#include "lifecycle.h"
 
 char *ConnectionInfo;
 
@@ -198,20 +197,6 @@ static int indexForScanlinePad[65] = {
 #ifndef MIN
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 #endif
-
-int
-main(int argc, char *argv[], char *envp[])
-{
-    TinyXServerInitialize(argc, argv, envp);
-
-    do {
-        TinyXServerInitializeGeneration(argc, argv);
-        TinyXServerDispatchGeneration();
-    } while (!TinyXServerCloseGeneration());
-
-    TinyXServerShutdown();
-    return 0;
-}
 
 static const int VendorRelease = VENDOR_RELEASE;
 static const char * const VendorString = VENDOR_STRING;

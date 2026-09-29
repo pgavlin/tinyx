@@ -65,6 +65,7 @@ SOFTWARE.
 #include "dixevents.h"
 #include "dispatch.h"
 #include "lifecycle.h"
+#include "tinyx-host.h"
 
 #ifdef DPMSExtension
 #define DPMS_SERVER
@@ -89,18 +90,19 @@ TinyXServerInitialize(int argc, char **argv, char **envp)
 
     display = "0";
 
-    /* Quartz support on Mac OS X requires that the Cocoa event loop be in
-     * the main thread. This allows the X server main to be called again
-     * from another thread. */
-    CheckUserParameters(argc, argv, envp);
-    CheckUserAuthorization();
-    InitConnectionLimits();
+    if (!TinyXHostHasCustomOps()) {
+        /* Quartz support on Mac OS X requires that the Cocoa event loop be in
+         * the main thread. This allows the X server main to be called again
+         * from another thread. */
+        CheckUserParameters(argc, argv, envp);
+        CheckUserAuthorization();
 
-    /* Prepare the X authority file from the environment. A command-line
-     * option processed below may override it. */
-    xauthfile = getenv("XAUTHORITY");
-    if (xauthfile)
-        InitAuthorization(xauthfile);
+        /* A native command-line option may override this environment value. */
+        xauthfile = getenv("XAUTHORITY");
+        if (xauthfile)
+            InitAuthorization(xauthfile);
+    }
+    InitConnectionLimits();
     ProcessCommandLine(argc, argv);
 }
 
@@ -235,6 +237,12 @@ TinyXServerStep(unsigned int requestBudget, TinyXServerStepResult *result)
         result->generationFinished = dispatchException != 0;
         result->nextTimeoutMillis = TimerNextDelay();
     }
+}
+
+void
+TinyXServerRequestTermination(void)
+{
+    dispatchException |= DE_TERMINATE;
 }
 
 Bool

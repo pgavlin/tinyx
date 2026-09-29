@@ -23,6 +23,7 @@ void TinyXServerInitializeGeneration(int argc, char **argv);
 void TinyXServerDispatchGeneration(void);
 /* A requestBudget of zero means unlimited. This operation never blocks. */
 void TinyXServerStep(unsigned int requestBudget, TinyXServerStepResult *result);
+void TinyXServerRequestTermination(void);
 Bool TinyXServerCloseGeneration(void);
 void TinyXServerShutdown(void);
 

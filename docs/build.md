@@ -85,67 +85,15 @@ tests/
 
 The existing source remains where it is.
 
-## Start with a small public API
+## Public embedding API
 
-`include/tinyx.h`:
+Phase 8 established the installed `include/tinyx.h` facade. Its opaque handles,
+configuration structures, status model, ownership rules, and scheduling
+contract are documented in the [Phase 8 Embedding API](embedding-api-design.md).
+`kdrive/memory/embed-example.c` is the current native in-process example.
 
-```c
-#ifndef TINYX_H
-#define TINYX_H
-
-#include <stddef.h>
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-typedef struct tinyx_config {
-    uint32_t width;
-    uint32_t height;
-
-    void (*damage)(
-        void *userdata,
-        uint32_t x,
-        uint32_t y,
-        uint32_t width,
-        uint32_t height);
-
-    void (*log)(void *userdata, const char *message);
-    void *userdata;
-} tinyx_config;
-
-/*
- * Initially TinyX should be treated as a singleton. An opaque server
- * object can be introduced later if the X server globals are removed.
- */
-int tinyx_init(const tinyx_config *config);
-void tinyx_shutdown(void);
-
-/* Process at most `budget` requests without blocking. */
-int tinyx_step(uint32_t budget);
-
-int tinyx_client_open(void);
-void tinyx_client_close(int client);
-
-int tinyx_client_write(int client, const void *data, size_t size);
-size_t tinyx_client_read(int client, void *data, size_t capacity);
-
-uint8_t *tinyx_framebuffer(void);
-uint32_t tinyx_framebuffer_stride(void);
-
-void tinyx_pointer_motion(int32_t x, int32_t y);
-void tinyx_pointer_button(uint32_t button, int pressed);
-void tinyx_key(uint32_t keycode, int pressed);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif
-```
-
-The first implementation can return errors for most operations. The point is to establish the embedding boundary early.
+The Phase 9 build should compile that existing facade into the `tinyx` static
+library rather than introduce another API or an `embed/` replacement layer.
 
 ## Initial CMake file
 
@@ -166,9 +114,11 @@ set(CMAKE_C_EXTENSIONS ON)
 add_library(tinyx STATIC)
 
 target_sources(tinyx PRIVATE
-    embed/tinyx.c
+    kdrive/memory/api.c
+    kdrive/memory/memory.c
+    kdrive/memory/meminit.c
 
-    # Add these groups incrementally:
+    # Add the existing core groups incrementally:
     # dix/atom.c
     # dix/resource.c
     # ...
@@ -212,7 +162,8 @@ if(EMSCRIPTEN)
         "SHELL:-s WASM=1"
         "SHELL:-s ALLOW_MEMORY_GROWTH=1"
         "SHELL:-s NO_EXIT_RUNTIME=1"
-        "SHELL:-s EXPORTED_FUNCTIONS=['_tinyx_init','_tinyx_shutdown','_tinyx_step','_tinyx_client_open','_tinyx_client_close','_tinyx_client_write','_tinyx_client_read','_tinyx_framebuffer','_tinyx_framebuffer_stride','_malloc','_free']"
+        # Populate this from the deliberate TINYX_API declarations in tinyx.h.
+        "SHELL:-s EXPORTED_FUNCTIONS=@TINYX_EXPORTED_FUNCTIONS@"
         "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','HEAPU8']"
     )
 endif()
@@ -311,17 +262,19 @@ Treat the compiler errors as the porting work queue.
 Don’t aim for “an X server in the browser” first. Aim for:
 
 1. WASM module loads.
-2. `tinyx_init()` allocates a 640×480 framebuffer.
-3. `tinyx_framebuffer()` returns it.
+2. `tinyx_server_create()` initializes a 640×480 screen.
+3. `tinyx_server_get_framebuffer()` returns it.
 4. JavaScript displays it on a canvas.
-5. `tinyx_step()` returns immediately.
+5. `tinyx_server_step()` returns immediately.
 6. No filesystem, socket, signal, thread, or `select()` use.
 
-Then wire in the X server initialization.
+The native embedding facade already exercises the complete server
+initialization path. Phase 9 must reproduce its source configuration rather
+than substitute a framebuffer-only stub.
 
-## The critical refactor
+## Lifecycle refactor already completed
 
-The current shape is:
+The historical shape was:
 
 ```c
 main()
@@ -336,54 +289,12 @@ main()
 }
 ```
 
-You want:
-
-```c
-int
-tinyx_init(const tinyx_config *config)
-{
-    /* One-time part of dix/main.c. */
-    return 0;
-}
-
-int
-tinyx_step(uint32_t budget)
-{
-    /*
-     * Poll injected input.
-     * Process queued client requests.
-     * Run expired timers.
-     * Flush client output.
-     * Return without waiting.
-     */
-    return requests_processed;
-}
-
-void
-tinyx_shutdown(void)
-{
-    /* Cleanup part of dix/main.c. */
-}
-```
-
-I would first extract `main()` into internal lifecycle functions while preserving the native executable:
-
-```c
-int
-main(int argc, char **argv, char **envp)
-{
-    if (TinyXServerInit(argc, argv, envp) != 0)
-        return 1;
-
-    while (!TinyXServerShouldExit())
-        TinyXServerDispatch();
-
-    TinyXServerShutdown();
-    return 0;
-}
-```
-
-After that works, introduce the cooperative `tinyx_step()` implementation.
+The refactored code now places the native entry point in
+`dix/main-entry.c`, reusable lifecycle operations in `dix/lifecycle.c`, and the
+public adapter in `kdrive/memory/api.c`. The native driver still performs
+blocking dispatch, while `tinyx_server_step()` uses the bounded nonblocking
+path. Keep those source boundaries intact in the sidecar build and omit
+`main-entry.c` from the static embedding library.
 
 ## Dependency policy
 

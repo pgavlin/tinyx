@@ -47,6 +47,10 @@ protocol semantics and server state.
   `fixed` and `cursor` through the ordinary DIX FPE, resource, rendering, and
   glyph-cursor paths without libXfont or filesystem access. Acquisition leases
   remain separate from `FontRec` materialization for future host providers.
+- **Phase 8 complete:** the installed `tinyx.h` facade exposes the singleton
+  lifecycle, bounded stepping, finite client streams, framebuffer and damage,
+  input injection, host callbacks, and protected fatal-error policy without
+  exposing server internals.
 
 ## Guiding principles
 
@@ -447,33 +451,12 @@ the complete 154-glyph cursor set.
 Freeze the public interface only after the internal lifecycle, transport,
 display, input, and runtime seams have working implementations.
 
-The API should be expressed in host terms rather than X server internals. Its
-shape will likely include:
+### Design
 
-```c
-tinyx_server *tinyx_create(const tinyx_config *config);
-void tinyx_destroy(tinyx_server *server);
-
-int tinyx_step(tinyx_server *server, uint32_t request_budget,
-               tinyx_step_result *result);
-
-tinyx_client *tinyx_client_open(tinyx_server *server,
-                                const tinyx_client_config *config);
-int tinyx_client_receive(tinyx_client *client,
-                         const void *bytes, size_t length);
-size_t tinyx_client_drain(tinyx_client *client,
-                          void *bytes, size_t capacity);
-void tinyx_client_close(tinyx_client *client);
-
-int tinyx_pointer_motion(...);
-int tinyx_pointer_button(...);
-int tinyx_key(...);
-
-int tinyx_framebuffer_info(...);
-size_t tinyx_take_damage(...);
-```
-
-These names are placeholders. API design must specify:
+[Phase 8 Embedding API](embedding-api-design.md) records the locked v1 API and
+its ownership, scheduling, error, poisoning, threading, ABI, and symbol
+visibility contracts. The API is expressed in host terms rather than X server
+internals and specifies:
 
 - singleton behavior despite the opaque server handle;
 - ownership and lifetime of server, clients, buffers, and callback data;
@@ -496,6 +479,29 @@ isolation.
 - a native in-process example uses only the public API;
 - all ownership, error, and scheduling behavior is documented;
 - only deliberate public symbols are exported.
+
+### Implemented
+
+`include/tinyx.h` is the installed public header. It exposes opaque server and
+client handles, versioned configuration structures, explicit status values,
+bounded stepping, finite bidirectional client streams, framebuffer and damage
+access, input injection, and host callbacks. Exactly one server lifetime and
+one generation are supported per process or module. Every operation that may
+enter fatal core code uses the protected host boundary; fatal creation cleans
+up its facade and later fatal errors poison the handle.
+
+`kdrive/memory/api.c` adapts the public facade to the earlier internal seams.
+Custom embedding hosts create no native listeners, while the native Xtrans
+path and executables retain their existing behavior. Client send operations
+accept bounded prefixes, and receive operations relieve explicit output
+backpressure. Framebuffer pixels are native-endian and read-only to the host.
+
+`kdrive/memory/embed-example.c` is a native in-process example that includes
+only `tinyx.h`. `kdrive/memory/api-test.c` validates startup without native
+listeners, one-lifetime enforcement, partial client input, the ordinary X11
+setup handshake, bounded output draining, and clean shutdown. The native
+process `main()` is in a separate archive member so an embedder can provide its
+own entry point without a duplicate symbol.
 
 ## Phase 9: Add build and host products
 
