@@ -141,15 +141,56 @@ Only encodings 0 through 255 are retained from the modern Unicode 6x13 BDF.
 This intentionally matches the historical ISO-8859-1 built-in font rather
 than embedding thousands of glyphs.
 
-### 3. Materialize an ordinary `FontRec` on open
+Generated arrays are one implementation of an internal decoded-font view;
+they must not become inputs that the materializer references directly by
+symbol. The same view must be constructible over borrowed or dynamically
+owned metrics, properties, lookup tables, and bitmap spans.
 
-Generated definitions are immutable and process-lifetime data. Each successful
+### 3. Separate acquisition from `FontRec` materialization
+
+The embedded FPE obtains fonts from an internal synchronous catalog boundary,
+then passes a decoded-font view to a separate materializer. Conceptually, the
+boundary has these responsibilities:
+
+```c
+typedef struct TinyXFontCatalogOps {
+    int (*acquire)(void *userdata, const char *name,
+                   TinyXDecodedFontLease *lease);
+    void (*release)(void *userdata, TinyXDecodedFontLease *lease);
+    int (*list)(void *userdata, const char *pattern, ...);
+} TinyXFontCatalogOps;
+```
+
+These names and signatures are illustrative and remain internal. The
+important contract is that a successful acquisition returns an immutable view
+plus a lease that remains valid until its matching release. The view contains
+only host-neutral values and byte spans; it contains no `FontRec`, atom IDs,
+FPE objects, or screen pointers. Release is called on every close and on every
+partially failed open. A catalog may return borrowed process-lifetime data,
+reference-counted data, or per-open allocated data without changing the FPE or
+materializer.
+
+Phase 7 supplies exactly one catalog implementation: the built-in catalog over
+checked-in generated data. Its acquire operation returns static views and its
+release operation is a no-op. Defining and exposing a host-configurable catalog
+is explicitly deferred, but the FPE must depend on the internal catalog
+contract rather than directly searching generated arrays.
+
+Catalog acquisition is synchronous in Phase 7. This does not preclude later
+asynchronous acquisition: DIX already supports suspended FPE operations, but
+cancellation, wakeup, and reentrancy policy must be designed with the public
+embedding API rather than guessed now.
+
+### 4. Materialize an ordinary `FontRec` on open
+
+The built-in catalog's generated definitions are immutable process-lifetime
+data, but the materializer does not rely on that lifetime. Each successful
 open allocates a `FontRec` plus an internal instance containing:
 
 - `CharInfoRec` entries;
 - glyph storage converted to the bitmap format requested by DIX;
 - generation-specific font properties and atoms;
-- a pointer to the immutable generated definition.
+- the acquired decoded-font lease and its release context.
 
 The backend implements `get_glyphs` and `get_metrics` for all four
 `FontEncoding` values. Missing characters use the declared default character
@@ -165,10 +206,12 @@ Properties cannot be emitted as final `FontPropRec` values because atom IDs
 are generation-local. They are represented as strings/integers in generated
 data and materialized with `MakeAtom()` for each opened instance.
 
-Closing the final reference frees only the materialized instance. Generated
-data remains immutable and is never owned by an X client.
+Closing the final reference frees the materialized instance and releases its
+catalog lease. Generated data remains immutable and is never owned by an X
+client. The materializer must not retain pointers outside the leased decoded
+view, and catalog code must not inspect the resulting `FontRec`.
 
-### 4. Keep native and embedded policies distinct
+### 5. Keep native and embedded policies distinct
 
 The native default build continues to register libXfont's built-in and
 font-file FPEs and keeps its current compiled font path. This avoids reducing
@@ -193,7 +236,7 @@ An explicit `-fp` or `SetFontPath` request in an embedded build accepts only
 semantics. The backend must not silently reinterpret arbitrary paths as the
 embedded catalog.
 
-### 5. Keep acquisition internal for now
+### 6. Keep acquisition internal for now
 
 Phase 7 does not add a public host font-provider callback. A callback accepting
 raw PCF/BDF bytes would still require a runtime parser; one returning
@@ -201,11 +244,27 @@ raw PCF/BDF bytes would still require a runtime parser; one returning
 introduce ownership, suspension, cancellation, and reentrancy rules just
 before the Phase 8 public API is defined.
 
-The internal separation between generated font definitions and the embedded
-FPE leaves room for a later decoded-bitmap provider. Such a provider should
-use host-neutral glyph metrics and bitmap spans, then reuse the same
-materialization code. Its ownership and synchronization model should be
-specified as part of the public API rather than inferred from libXfont.
+The internal catalog contract is therefore a required architectural seam, not
+a provisional public API. A later embedding facade can adapt host-registered
+fonts or a host provider to that contract without changing DIX, the FPE, or
+bitmap conversion. A decoded-bitmap provider should use the same host-neutral
+metrics and bitmap spans and should express ownership through acquisition
+leases rather than exposing server objects.
+
+To preserve that path, the Phase 7 implementation must satisfy these
+invariants:
+
+- the FPE performs lookup and listing only through the catalog boundary;
+- the materializer accepts a decoded view and has no dependency on generated
+  font symbols or catalog implementation details;
+- every acquired lease is released exactly once, including allocation and
+  realization failures;
+- built-in aliases belong to catalog policy rather than bitmap conversion;
+- generation teardown releases all open leases before catalog teardown;
+- no process-lifetime assumption appears in the decoded-font view contract.
+
+The future public provider can then add naming, registration, ownership, and
+possibly asynchronous policy without replacing the Phase 7 backend.
 
 ## X11-visible behavior
 
@@ -251,6 +310,9 @@ consistent with the rest of the provisional embedding core.
 - exercise each `FontEncoding` lookup mode and missing-glyph behavior;
 - exercise supported bitmap bit orders and glyph padding;
 - test exact names, aliases, wildcard listing, and unknown names;
+- test the materializer with both static and dynamically owned decoded views;
+- inject failures at each open stage and verify every catalog lease is released
+  exactly once;
 - run open/close repeatedly under AddressSanitizer where available.
 
 ### Protocol and rendering tests
@@ -278,14 +340,16 @@ font coverage also exercises the Phase 3 transport path.
 
 1. **Data pipeline:** add provenance, BDF generator, and checked-in fixed and
    cursor definitions with deterministic tests.
-2. **Embedded FontRec support:** split reusable libXfont compatibility helpers
-   out of the temporary stubs and implement glyph lookup, format conversion,
-   properties, and destruction.
-3. **Embedded FPE:** implement registration, path handling, aliases, opening,
-   listing, and error behavior.
-4. **Build and lifecycle integration:** make the no-libXfont configuration use
+2. **Decoded view and catalog seam:** define the internal immutable view and
+   acquire/release contract, then implement the static built-in catalog.
+3. **Embedded FontRec support:** split reusable libXfont compatibility helpers
+   out of the temporary stubs and implement catalog-independent glyph lookup,
+   format conversion, properties, lease release, and destruction.
+4. **Embedded FPE:** implement registration, path handling, catalog-based
+   aliases and listing, opening, and error behavior.
+5. **Build and lifecycle integration:** make the no-libXfont configuration use
    `built-ins`, remove the startup-failure warning, and preserve native policy.
-5. **End-to-end validation:** add protocol/render/reset tests and update the
+6. **End-to-end validation:** add protocol/render/reset tests and update the
    architecture and build documentation.
 
 Phase 7 is complete only when the embedded configuration starts successfully,

@@ -412,11 +412,14 @@ and clearly document unsupported font requests.
 [Phase 7 Font Architecture](font-design.md) records the selected design and
 implementation slices. The embedded configuration will use checked-in,
 development-time-generated bitmap data behind a synchronous `built-ins` FPE.
-It will materialize ordinary `FontRec` instances, preserving DIX font
-resources, protocol operations, FB text rendering, and glyph cursors without
-a runtime parser or filesystem. Native builds retain the existing libXfont
-font-file behavior. No public host font-provider API is introduced before the
-Phase 8 facade defines ownership and reentrancy rules.
+An internal acquire/release catalog keeps font acquisition separate from the
+catalog-independent `FontRec` materializer, allowing a later host provider to
+reuse the backend without exposing DIX structures. The initial catalog only
+serves built-in data. DIX font resources, protocol operations, FB text
+rendering, and glyph cursors therefore remain intact without a runtime parser
+or filesystem. Native builds retain the existing libXfont font-file behavior.
+No public host font-provider API is introduced before the Phase 8 facade
+defines naming, ownership, synchronization, and reentrancy rules.
 
 ## Phase 8: Define the public embedding API
 
