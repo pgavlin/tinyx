@@ -21,6 +21,18 @@ WASM host ───┘
 Host implementations own acquisition and presentation. The core owns X11
 protocol semantics and server state.
 
+## Implementation status
+
+- **Phase 1 complete:** process and generation lifecycle operations are
+  callable, and the native `main()` is a thin adapter.
+- **Phase 2 complete:** dispatch initialization and teardown are separate from
+  execution; bounded `TinyXServerStep()` is nonblocking; the native lifecycle
+  retains blocking behavior; pending work and the next timer delay are
+  reported to cooperative hosts.
+- **Temporary font configuration:** `--disable-fonts` permits build and link
+  validation without libXfont. It intentionally cannot complete server
+  startup and will be replaced in phase 7.
+
 ## Guiding principles
 
 1. **Preserve behavior while extracting boundaries.** Each early change should

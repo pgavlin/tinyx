@@ -126,8 +126,8 @@ static OsTimerPtr timers = NULL;
  *     pClientsReady is an array to store ready client->index values into.
  *****************/
 
-int
-WaitForSomething(int *pClientsReady)
+static int
+WaitForSomethingInternal(int *pClientsReady, Bool block)
 {
     int i;
     struct timeval waittime, *wt;
@@ -204,6 +204,11 @@ WaitForSomething(int *pClientsReady)
 	SmartScheduleIdle = TRUE;
 #endif
 	BlockHandler((pointer)&wt, (pointer)&LastSelectMask);
+        if (!block) {
+            waittime.tv_sec = 0;
+            waittime.tv_usec = 0;
+            wt = &waittime;
+        }
 	if (NewOutputPending)
 	    FlushAllOutput();
 	/* keep this check close to select() call to minimize race */
@@ -279,6 +284,8 @@ WaitForSomething(int *pClientsReady)
                 if (expired)
                     return 0;
 	    }
+            if (!block)
+                return 0;
 	}
 	else
 	{
@@ -375,6 +382,46 @@ WaitForSomething(int *pClientsReady)
 	}
     }
     return nready;
+}
+
+int
+WaitForSomething(int *pClientsReady)
+{
+    return WaitForSomethingInternal(pClientsReady, TRUE);
+}
+
+int
+PollForSomething(int *pClientsReady)
+{
+    return WaitForSomethingInternal(pClientsReady, FALSE);
+}
+
+Bool
+OsWorkPending(void)
+{
+    return workQueue || XFD_ANYSET(&ClientsWithInput) ||
+           *checkForInput[0] != *checkForInput[1];
+}
+
+int
+TimerNextDelay(void)
+{
+    CARD32 now;
+    INT32 timeout;
+
+    if (!timers)
+        return -1;
+
+    now = GetTimeInMillis();
+    timeout = timers->expires - now;
+    if (timeout > 0 && timeout > timers->delta + 250) {
+        CheckAllTimers(now);
+        if (!timers)
+            return -1;
+        timeout = timers->expires - now;
+    }
+
+    return timeout > 0 ? timeout : 0;
 }
 
 #if 0

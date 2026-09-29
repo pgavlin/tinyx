@@ -95,6 +95,9 @@ extern void (*OsVendorVErrorFProc)(const char *, va_list args);
 int WaitForSomething(
     int* /*pClientsReady*/
 );
+int PollForSomething(int* /*pClientsReady*/);
+Bool OsWorkPending(void);
+int TimerNextDelay(void);
 
 int ReadRequestFromClient(ClientPtr /*client*/);
 

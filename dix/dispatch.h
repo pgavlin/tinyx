@@ -36,6 +36,13 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #ifndef DISPATCH_H
 #define DISPATCH_H 1
 
+#define DISPATCH_REQUESTS_UNLIMITED 0
+
+void DispatchStart(void);
+unsigned int DispatchStep(Bool block, unsigned int requestBudget);
+Bool DispatchWorkPending(void);
+void DispatchFinish(void);
+
 DISPATCH_PROC(InitClientPrivates);
 DISPATCH_PROC(ProcAllocColor);
 DISPATCH_PROC(ProcAllocColorCells);

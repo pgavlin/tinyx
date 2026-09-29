@@ -63,6 +63,7 @@ SOFTWARE.
 #include "dixfont.h"
 #include "extnsionst.h"
 #include "dixevents.h"
+#include "dispatch.h"
 #include "lifecycle.h"
 
 #ifdef DPMSExtension
@@ -72,7 +73,6 @@ SOFTWARE.
 #endif
 
 extern int InitClientPrivates(ClientPtr client);
-extern void Dispatch(void);
 extern char *ConnectionInfo;
 
 /* Helpers retained in main.c with the DIX screen and connection data. */
@@ -212,12 +212,29 @@ TinyXServerInitializeGeneration(int argc, char **argv)
 
     if (!CreateConnectionBlock())
         FatalError("could not create connection block info");
+
+    DispatchStart();
 }
 
 void
 TinyXServerDispatchGeneration(void)
 {
-    Dispatch();
+    while (!dispatchException)
+        (void) DispatchStep(TRUE, DISPATCH_REQUESTS_UNLIMITED);
+}
+
+void
+TinyXServerStep(unsigned int requestBudget, TinyXServerStepResult *result)
+{
+    unsigned int requestsProcessed = DispatchStep(FALSE, requestBudget);
+
+    if (result) {
+        result->requestsProcessed = requestsProcessed;
+        result->immediateWork = DispatchWorkPending() ||
+            (requestBudget && requestsProcessed >= requestBudget);
+        result->generationFinished = dispatchException != 0;
+        result->nextTimeoutMillis = TimerNextDelay();
+    }
 }
 
 Bool
@@ -225,6 +242,8 @@ TinyXServerCloseGeneration(void)
 {
     Bool terminating = (dispatchException & DE_TERMINATE) != 0;
     int i;
+
+    DispatchFinish();
 
     if (screenIsSaved == SCREEN_SAVER_ON)
         SaveScreens(SCREEN_SAVER_OFF, ScreenSaverReset);

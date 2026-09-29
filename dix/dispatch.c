@@ -343,38 +343,169 @@ SmartScheduleClient(int *clientReady, int nready)
 
 #define MAJOROP ((xReq *)client->requestBuffer)->reqType
 
+static Bool dispatchStarted;
+static int lastDispatchClient;
+
 void
-Dispatch(void)
+DispatchStart(void)
 {
-    int *clientReady;  /* array of request ready clients */
+    if (dispatchStarted)
+        return;
 
+    nextFreeClientID = 1;
+    InitSelections();
+    nClients = 0;
+    lastDispatchClient = 0;
+    dispatchStarted = TRUE;
+}
+
+static void
+RotateReadyClients(int *clientReady, int nready)
+{
+    int best = 0;
+    int bestDistance = MaxClients + 1;
+    int i;
+
+    /* DispatchReadyClients consumes the array from the end. Put the next
+     * client in round-robin order there so a small request budget cannot
+     * repeatedly favor the same descriptor. */
+    for (i = 0; i < nready; i++) {
+        int distance = clientReady[i] - lastDispatchClient;
+
+        if (distance <= 0)
+            distance += MaxClients;
+        if (distance < bestDistance) {
+            best = i;
+            bestDistance = distance;
+        }
+    }
+
+    if (nready > 0 && best != nready - 1) {
+        int client = clientReady[best];
+        clientReady[best] = clientReady[nready - 1];
+        clientReady[nready - 1] = client;
+    }
+}
+
+static unsigned int
+DispatchReadyClients(int *clientReady, int nready, unsigned int requestBudget)
+{
+    unsigned int requestsProcessed = 0;
     int result;
-
     ClientPtr client;
-
-    int nready;
-
     HWEventQueuePtr *icheck = checkForInput;
 
 #ifdef SMART_SCHEDULE
     long start_tick;
 #endif
 
-    nextFreeClientID = 1;
-    InitSelections();
-    nClients = 0;
+    /*****************
+     * Handle events in round robin fashion, doing input between each round.
+     *****************/
+    while (!dispatchException && (--nready >= 0)) {
+        client = clients[clientReady[nready]];
+        if (!client) {
+            /* KillClient can cause this to happen. */
+            continue;
+        }
+        /* GrabServer activation can cause this to be true. */
+        if (grabState == GrabKickout) {
+            grabState = GrabActive;
+            break;
+        }
+        isItTimeToYield = FALSE;
+        lastDispatchClient = client->index;
+
+        requestingClient = client;
+#ifdef SMART_SCHEDULE
+        start_tick = SmartScheduleTime;
+#endif
+        while (!isItTimeToYield) {
+            if (requestBudget && requestsProcessed >= requestBudget)
+                break;
+
+            if (*icheck[0] != *icheck[1]) {
+                ProcessInputEvents();
+                FlushIfCriticalOutputPending();
+            }
+#ifdef SMART_SCHEDULE
+            if (!SmartScheduleDisable &&
+                (SmartScheduleTime - start_tick) >= SmartScheduleSlice) {
+                /* Penalize clients which consume ticks. */
+                if (client->smart_priority > SMART_MIN_PRIORITY)
+                    client->smart_priority--;
+                break;
+            }
+#endif
+            result = ReadRequestFromClient(client);
+            if (result <= 0) {
+                if (result < 0)
+                    CloseDownClient(client);
+                break;
+            }
+
+            requestsProcessed++;
+            client->sequence++;
+#ifdef DEBUG
+            if (client->requestLogIndex == MAX_REQUEST_LOG)
+                client->requestLogIndex = 0;
+            client->requestLog[client->requestLogIndex] = MAJOROP;
+            client->requestLogIndex++;
+#endif
+            if (result > (maxBigRequestSize << 2))
+                result = BadLength;
+            else
+                result = (*client->requestVector[MAJOROP]) (client);
+
+            if (result != Success) {
+                if (client->noClientException != Success)
+                    CloseDownClient(client);
+                else
+                    SendErrorToClient(client, MAJOROP,
+                                      MinorOpcodeOfRequest(client),
+                                      client->errorValue, result);
+                break;
+            }
+        }
+        FlushAllOutput();
+#ifdef SMART_SCHEDULE
+        client = clients[clientReady[nready]];
+        if (client)
+            client->smart_stop_tick = SmartScheduleTime;
+#endif
+        requestingClient = NULL;
+
+        if (requestBudget && requestsProcessed >= requestBudget)
+            break;
+    }
+
+    return requestsProcessed;
+}
+
+unsigned int
+DispatchStep(Bool block, unsigned int requestBudget)
+{
+    int *clientReady;
+    int nready;
+    unsigned int requestsProcessed = 0;
+    HWEventQueuePtr *icheck = checkForInput;
+
+    DispatchStart();
 
     clientReady = (int *) ALLOCATE_LOCAL(sizeof(int) * MaxClients);
     if (!clientReady)
-        return;
+        return 0;
 
-    while (!dispatchException) {
-        if (*icheck[0] != *icheck[1]) {
-            ProcessInputEvents();
-            FlushIfCriticalOutputPending();
-        }
+    if (*icheck[0] != *icheck[1]) {
+        ProcessInputEvents();
+        FlushIfCriticalOutputPending();
+    }
 
-        nready = WaitForSomething(clientReady);
+    if (!dispatchException) {
+        if (block)
+            nready = WaitForSomething(clientReady);
+        else
+            nready = PollForSomething(clientReady);
 
 #ifdef SMART_SCHEDULE
         if (nready && !SmartScheduleDisable) {
@@ -382,87 +513,42 @@ Dispatch(void)
             nready = 1;
         }
 #endif
-       /*****************
-	*  Handle events in round robin fashion, doing input between
-	*  each round
-	*****************/
-
-        while (!dispatchException && (--nready >= 0)) {
-            client = clients[clientReady[nready]];
-            if (!client) {
-                /* KillClient can cause this to happen */
-                continue;
-            }
-            /* GrabServer activation can cause this to be true */
-            if (grabState == GrabKickout) {
-                grabState = GrabActive;
-                break;
-            }
-            isItTimeToYield = FALSE;
-
-            requestingClient = client;
-#ifdef SMART_SCHEDULE
-            start_tick = SmartScheduleTime;
-#endif
-            while (!isItTimeToYield) {
-                if (*icheck[0] != *icheck[1]) {
-                    ProcessInputEvents();
-                    FlushIfCriticalOutputPending();
-                }
-#ifdef SMART_SCHEDULE
-                if (!SmartScheduleDisable &&
-                    (SmartScheduleTime - start_tick) >= SmartScheduleSlice) {
-                    /* Penalize clients which consume ticks */
-                    if (client->smart_priority > SMART_MIN_PRIORITY)
-                        client->smart_priority--;
-                    break;
-                }
-#endif
-                /* now, finally, deal with client requests */
-
-                result = ReadRequestFromClient(client);
-                if (result <= 0) {
-                    if (result < 0)
-                        CloseDownClient(client);
-                    break;
-                }
-
-                client->sequence++;
-#ifdef DEBUG
-                if (client->requestLogIndex == MAX_REQUEST_LOG)
-                    client->requestLogIndex = 0;
-                client->requestLog[client->requestLogIndex] = MAJOROP;
-                client->requestLogIndex++;
-#endif
-                if (result > (maxBigRequestSize << 2))
-                    result = BadLength;
-                else
-                    result = (*client->requestVector[MAJOROP]) (client);
-
-                if (result != Success) {
-                    if (client->noClientException != Success)
-                        CloseDownClient(client);
-                    else
-                        SendErrorToClient(client, MAJOROP,
-                                          MinorOpcodeOfRequest(client),
-                                          client->errorValue, result);
-                    break;
-                }
-            }
-            FlushAllOutput();
-#ifdef SMART_SCHEDULE
-            client = clients[clientReady[nready]];
-            if (client)
-                client->smart_stop_tick = SmartScheduleTime;
-#endif
-            requestingClient = NULL;
-        }
-        dispatchException &= ~DE_PRIORITYCHANGE;
+        if (requestBudget && nready > 1)
+            RotateReadyClients(clientReady, nready);
+        requestsProcessed =
+            DispatchReadyClients(clientReady, nready, requestBudget);
     }
-    KillAllClients();
+
+    dispatchException &= ~DE_PRIORITYCHANGE;
     DEALLOCATE_LOCAL(clientReady);
+    return requestsProcessed;
+}
+
+Bool
+DispatchWorkPending(void)
+{
+    return OsWorkPending();
+}
+
+void
+DispatchFinish(void)
+{
+    if (!dispatchStarted)
+        return;
+
+    KillAllClients();
     dispatchException &= ~DE_RESET;
     ResetOsBuffers();
+    dispatchStarted = FALSE;
+}
+
+void
+Dispatch(void)
+{
+    DispatchStart();
+    while (!dispatchException)
+        (void) DispatchStep(TRUE, DISPATCH_REQUESTS_UNLIMITED);
+    DispatchFinish();
 }
 
 #undef MAJOROP

@@ -479,8 +479,14 @@ screen behavior.
 
 ## 7. The main dispatch loop
 
-`Dispatch()` in `dix/dispatch.c` is the center of normal server execution.
-Conceptually it does this:
+The dispatcher in `dix/dispatch.c` is the center of normal server execution.
+Its lifecycle is now split into `DispatchStart()`, `DispatchStep()`, and
+`DispatchFinish()`. The native lifecycle repeatedly calls the blocking form of
+`DispatchStep()`; `Dispatch()` remains as a compatibility wrapper. Embedders
+can instead call `TinyXServerStep()`, which polls once, processes no more than
+the supplied request budget, and returns without waiting.
+
+Conceptually the native loop does this:
 
 ```mermaid
 flowchart TD
@@ -526,6 +532,11 @@ from one client before yielding.
 - reporting ready client indices to DIX.
 
 This is both the server scheduler and the Unix event-loop implementation.
+`PollForSomething()` runs the same pending-work, timer, handler, output, and
+readiness machinery with a zero timeout. `TimerNextDelay()` reports the next
+timer deadline to a cooperative host. Descriptor polling is still native OS
+behavior and will move behind the transport/event-loop boundary in later
+phases.
 
 ### Reading a request
 

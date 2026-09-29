@@ -10,9 +10,19 @@
 
 #include "misc.h"
 
+typedef struct {
+    unsigned int requestsProcessed;
+    Bool immediateWork;
+    Bool generationFinished;
+    /* Milliseconds until the next timer, or -1 when no timer is armed. */
+    int nextTimeoutMillis;
+} TinyXServerStepResult;
+
 void TinyXServerInitialize(int argc, char **argv, char **envp);
 void TinyXServerInitializeGeneration(int argc, char **argv);
 void TinyXServerDispatchGeneration(void);
+/* A requestBudget of zero means unlimited. This operation never blocks. */
+void TinyXServerStep(unsigned int requestBudget, TinyXServerStepResult *result);
 Bool TinyXServerCloseGeneration(void);
 void TinyXServerShutdown(void);
 
