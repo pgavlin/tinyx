@@ -2,8 +2,9 @@
 
 ## Status
 
-This document records the Phase 7 design. It does not mark Phase 7 as
-implemented.
+This document records the implemented Phase 7 architecture. The built-in
+catalog, decoded-font materializer, and FPE are complete; a public host font
+provider remains intentionally deferred.
 
 ## Goals
 
@@ -225,11 +226,10 @@ configuration:
 - its default font path is `built-ins`;
 - it is runnable rather than build-only.
 
-The configure help text and `TINYX_NO_FONTS` naming should be corrected during
-implementation. A follow-up may replace the boolean with an explicit
-`--with-font-backend=xfont|embedded` option. Avoid doing both migrations in
-the first implementation unless needed, so the architecture change remains
-reviewable.
+The configure help text now describes the embedded behavior and the old
+`TINYX_NO_FONTS` macro has been replaced by `TINYX_EMBEDDED_FONTS`. A follow-up
+may replace the historical boolean option with an explicit
+`--with-font-backend=xfont|embedded` selection.
 
 An explicit `-fp` or `SetFontPath` request in an embedded build accepts only
 `built-ins`. Unknown elements fail with the existing `BadValue` font-path

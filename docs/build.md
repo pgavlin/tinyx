@@ -1,20 +1,28 @@
 I’d start with a **sidecar CMake build**, leaving Autoconf intact as a reference. Don’t try to convert the entire build system before understanding which code belongs in the embedded server.
 
-## Temporary build without libXfont
+## Embedded fonts without libXfont
 
-The native build normally requires legacy libXfont 1 and libfontenc. During the
-embedding refactor it can instead build against local, build-only font stubs:
+The native build normally requires legacy libXfont 1 and libfontenc. A
+filesystem-free build instead uses TinyX's embedded bitmap backend:
 
 ```sh
 ./configure --disable-fonts [other options]
 make
 ```
 
-This configuration compiles and links without either font library, but it is
-not runnable: no font backend is registered, so generation initialization
-fails when the server opens its required `fixed` text font. The embedded
-`fixed` and `cursor` implementation planned for the font phase will replace
-these stubs. Do not treat `--disable-fonts` as a supported runtime mode.
+Despite the historical option name, this configuration has working font
+support. It registers a `built-ins` font-path element containing the X.Org
+6x13 `fixed` font and the complete cursor font, and does not link either
+libXfont or libfontenc. The default font path is `built-ins`, so `Xmemory` can
+complete generation startup without a font filesystem.
+
+The embedded catalog supports `fixed`, `6x13`, `cursor`, the canonical 6x13
+XLFD, and its historical 100-dpi alias. Other font names and filesystem font
+paths fail through normal X11 font errors. The default font-enabled build
+continues to use libXfont and its native filesystem behavior.
+
+The generated data's provenance and regeneration command are documented in
+[`fonts/README.md`](../fonts/README.md).
 
 ## What Autoconf currently does
 

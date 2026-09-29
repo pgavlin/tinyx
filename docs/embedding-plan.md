@@ -43,12 +43,10 @@ protocol semantics and server state.
 - **Phase 6 complete:** hosts can inject absolute or relative pointer motion,
   button transitions, and X keycode transitions without descriptors; events
   retain the ordinary KDrive, MI, and DIX path and wake cooperative hosts.
-- **Phase 7 designed:** [Phase 7 Font Architecture](font-design.md) selects a
-  small embedded bitmap-font FPE for filesystem-free `fixed` and `cursor`
-  support while retaining libXfont as the native compatibility backend.
-- **Temporary font configuration:** `--disable-fonts` currently permits build
-  and link validation without libXfont, but cannot complete server startup.
-  Phase 7 will turn this configuration into the runnable embedded backend.
+- **Phase 7 complete:** a synchronous embedded bitmap-font catalog supplies
+  `fixed` and `cursor` through the ordinary DIX FPE, resource, rendering, and
+  glyph-cursor paths without libXfont or filesystem access. Acquisition leases
+  remain separate from `FontRec` materialization for future host providers.
 
 ## Guiding principles
 
@@ -321,8 +319,8 @@ current rectangles with `TinyXMemoryDisplayTakeDamage()`. If the caller's
 capacity cannot hold the region, the backend returns one bounding rectangle,
 so presentation metadata is always bounded by caller storage. The server does
 not upload, display, or otherwise interpret the pixels. `Xmemory` is built as
-a non-installed reference frontend; with the temporary no-font configuration
-it links but still fails later at default-font startup as documented.
+a non-installed reference frontend. With the embedded font configuration it
+completes generation startup without a font filesystem.
 
 ## Phase 6: Add explicit input injection
 
@@ -420,6 +418,29 @@ rendering, and glyph cursors therefore remain intact without a runtime parser
 or filesystem. Native builds retain the existing libXfont font-file behavior.
 No public host font-provider API is introduced before the Phase 8 facade
 defines naming, ownership, synchronization, and reentrancy rules.
+
+### Implemented
+
+`dix/embedded-font.c` implements a synchronous `built-ins` FPE over an
+internal catalog contract. Catalog acquisition returns a decoded-font lease;
+the independent materializer converts canonical bitmap rows, metrics, and
+properties into generation-local `FontRec` instances and releases the lease
+on close or failure. The built-in catalog is static today but the materializer
+does not depend on generated symbols or process-lifetime ownership.
+
+`dix/embedded-font-data.c` contains generated ISO-8859-1 6x13 and complete
+cursor data. `fonts/generate-builtin-fonts.py` deterministically regenerates it
+from the X.Org BDF releases documented in `fonts/README.md`. The catalog
+supports `fixed`, `6x13`, `cursor`, the canonical 6x13 XLFD, and its historical
+100-dpi alias. Listing, querying, text rendering, and glyph cursor creation use
+the existing DIX and FB paths; unknown names and paths retain X11 error
+semantics.
+
+`--disable-fonts` now selects this runnable backend, defaults the font path to
+`built-ins`, and links neither libXfont nor libfontenc. The default build keeps
+legacy libXfont filesystem behavior for native compatibility. The Automake
+check validates generated encoding maps, bitmap bounds, required aliases, and
+the complete 154-glyph cursor set.
 
 ## Phase 8: Define the public embedding API
 

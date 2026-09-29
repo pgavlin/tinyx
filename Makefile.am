@@ -2,6 +2,10 @@ AUTOMAKE_OPTIONS = subdir-objects
 
 ACLOCAL_AMFLAGS=-I m4
 
+EXTRA_DIST = \
+	fonts/README.md \
+	fonts/generate-builtin-fonts.py
+
 if DBE
 DBE_DIR=dbe
 endif

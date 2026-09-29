@@ -5,7 +5,18 @@ AM_CFLAGS = $(DIX_CFLAGS) \
 	-DVENDOR_RELEASE="@VENDOR_RELEASE@"
 
 if NO_XFONT
-FONT_BACKEND_SRCS = fontstubs.c
+FONT_BACKEND_SRCS = \
+	fontstubs.c \
+	embedded-font.c \
+	embedded-font-data.c \
+	embedded-font.h
+
+check_PROGRAMS = embedded-font-data-test
+TESTS = $(check_PROGRAMS)
+embedded_font_data_test_SOURCES = \
+	tests/embedded-font-data-test.c \
+	embedded-font.h
+embedded_font_data_test_LDADD = libdix.la
 endif
 
 libdix_la_SOURCES = 	\

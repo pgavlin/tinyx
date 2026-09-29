@@ -63,6 +63,9 @@ Equipment Corporation.
 #include "opaque.h"
 #include "dixfontstr.h"
 #include "closestr.h"
+#ifdef TINYX_EMBEDDED_FONTS
+#include "embedded-font.h"
+#endif
 
 #ifdef XF86BIGFONT
 #define _XF86BIGFONT_SERVER_
@@ -1859,10 +1862,14 @@ InitFonts()
     patternCache = MakeFontPatternCache();
 
     {
+#ifdef TINYX_EMBEDDED_FONTS
+        TinyXRegisterEmbeddedFontFPE();
+#else
 #ifdef KDRIVESERVER
         BuiltinRegisterFpeFunctions();
 #endif
         FontFileRegisterFpeFunctions();
+#endif
     }
 }
 

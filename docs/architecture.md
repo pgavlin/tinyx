@@ -940,15 +940,32 @@ blocking Unix `select()` loop.
 
 Fonts cross several layers:
 
-- DIX implements font protocol requests and server-side font lifetime;
-- `libXfont` supplies font backends and loading;
-- the configured font path identifies filesystem directories;
+- DIX implements font protocol requests, font-path elements, aliases, and
+  server-side resource lifetime;
+- a font-path-element (FPE) backend supplies font acquisition, metrics, and
+  glyph bitmaps;
 - screen callbacks realize and unrealize fonts;
 - GC text operations eventually invoke glyph rendering in FB or MI.
 
+The default native build uses libXfont's filesystem backend and preserves its
+configured directory paths. The `--disable-fonts` build instead registers the
+host-independent `built-ins` FPE in `dix/embedded-font.c`. Its internal catalog
+serves checked-in, development-time-generated 6x13 and cursor data. An
+acquire/release lease separates catalog ownership from conversion into an
+ordinary `FontRec`, so a later embedding provider can reuse the materializer
+without exposing DIX structures. Phase 7 intentionally exposes only the
+built-in catalog.
+
+Generated rows have a canonical representation. Opening a font converts them
+to DIX's requested bit order, byte order, scan unit, and glyph padding. The
+result then follows the same QueryFont, text rendering, glyph-cursor, screen
+realization, resource, and reset paths as a libXfont font. Unsupported names
+and paths produce normal X11 errors.
+
 Startup requires both a default text font and a cursor font. The root cursor
-is constructed from the latter. As a result, fonts are part of core startup,
-not merely an optional protocol feature.
+is constructed from the latter. The embedded backend supplies both without a
+filesystem, confirming that fonts are part of core startup rather than merely
+an optional protocol feature.
 
 ## 16. Global state and the singleton model
 

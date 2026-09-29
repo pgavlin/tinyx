@@ -229,7 +229,7 @@ AC_ARG_ENABLE(lto,           AS_HELP_STRING([--disable-lto],
 				  [Disable link-time optimization (default: enabled when supported)]),
 			        [LTO=$enableval], [LTO=yes])
 AC_ARG_ENABLE(fonts,         AS_HELP_STRING([--disable-fonts],
-                                  [Build without a font backend (build-only; server startup will fail)]),
+                                  [Use the filesystem-free embedded fixed and cursor fonts]),
                                 [FONTS=$enableval], [FONTS=yes])
 AC_ARG_WITH(int10,           AS_HELP_STRING([--with-int10=BACKEND], [int10 backend: vm86, x86emu or stub]),
 				[INT10="$withval"],
@@ -253,7 +253,11 @@ AC_ARG_WITH(builder-addr,    AS_HELP_STRING([--with-builder-addr=ADDRESS],
 AC_ARG_WITH(fontdir,         AS_HELP_STRING([--with-fontdir=FONTDIR], [Path to top level dir where fonts are installed (default: ${libdir}/X11/fonts)]),
                                 [ FONTDIR="$withval" ],
                                 [ FONTDIR="${libdir}/X11/fonts" ])
-DEFAULT_FONT_PATH="${FONTDIR}/misc/,${FONTDIR}/100dpi/,${FONTDIR}/75dpi/"
+if test "x$FONTS" = xno; then
+    DEFAULT_FONT_PATH="built-ins"
+else
+    DEFAULT_FONT_PATH="${FONTDIR}/misc/,${FONTDIR}/100dpi/,${FONTDIR}/75dpi/"
+fi
 AC_ARG_WITH(default-font-path, AS_HELP_STRING([--with-default-font-path=PATH], [Comma separated list of font dirs]),
 				[ FONTPATH="$withval" ],
 				[ FONTPATH="${DEFAULT_FONT_PATH}" ])
@@ -336,9 +340,8 @@ AM_CONDITIONAL(NO_XFONT, [test "x$FONTS" = xno])
 if test "x$FONTS" = xyes; then
     REQUIRED_LIBS="xfont fontenc"
 else
-    AC_DEFINE(TINYX_NO_FONTS, 1,
-              [Build without a font backend; the server cannot complete startup.])
-    AC_MSG_WARN([fonts are disabled; binaries will link but cannot complete server startup])
+    AC_DEFINE(TINYX_EMBEDDED_FONTS, 1,
+              [Use the filesystem-free embedded bitmap font backend.])
 fi
 
 AM_CONDITIONAL(SCREENSAVER, [test "x$SCREENSAVER" = xyes])

@@ -1,10 +1,7 @@
 /*
- * Build-only replacements for symbols historically supplied by libXfont.
- *
- * This file deliberately does not register a font backend.  It exists so a
- * --disable-fonts build can compile and link while the host-independent font
- * implementation is deferred.  Such a server cannot complete startup because
- * the required default text and cursor fonts cannot be opened.
+ * Compatibility implementations for utility symbols historically supplied by
+ * libXfont. The embedded font FPE is implemented separately in
+ * embedded-font.c; these helpers keep that backend independent of libXfont.
  */
 
 #ifdef HAVE_DIX_CONFIG_H

@@ -37,6 +37,8 @@ do-not-use-config.h.in
 kdrive/fbdev/Xfbdev
 kdrive/memory/Xmemory
 kdrive/vesa/Xvesa
+dix/embedded-font-data-test
+dix/embedded-font-data-test.log
 os/host-runtime-test
 os/host-runtime-test.log
 include/dix-config.h
