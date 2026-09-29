@@ -228,6 +228,9 @@ AC_ARG_ENABLE(debug,         AS_HELP_STRING([--enable-debug],
 AC_ARG_ENABLE(lto,           AS_HELP_STRING([--disable-lto],
 				  [Disable link-time optimization (default: enabled when supported)]),
 			        [LTO=$enableval], [LTO=yes])
+AC_ARG_ENABLE(fonts,         AS_HELP_STRING([--disable-fonts],
+                                  [Build without a font backend (build-only; server startup will fail)]),
+                                [FONTS=$enableval], [FONTS=yes])
 AC_ARG_WITH(int10,           AS_HELP_STRING([--with-int10=BACKEND], [int10 backend: vm86, x86emu or stub]),
 				[INT10="$withval"],
 				[INT10="$DEFAULT_INT10"])
@@ -327,7 +330,16 @@ XEXTXORG_LIB='$(top_builddir)/Xext/libXextbuiltin.la'
 
 dnl Core modules for most extensions, et al.
 REQUIRED_MODULES="[randrproto >= 1.2] renderproto [fixesproto >= 4.0] [damageproto >= 1.1] xcmiscproto xextproto xproto xtrans xf86bigfontproto [scrnsaverproto >= 1.1] bigreqsproto resourceproto fontsproto inputproto [kbproto >= 1.0.3]"
-REQUIRED_LIBS="xfont fontenc"
+REQUIRED_LIBS=""
+
+AM_CONDITIONAL(NO_XFONT, [test "x$FONTS" = xno])
+if test "x$FONTS" = xyes; then
+    REQUIRED_LIBS="xfont fontenc"
+else
+    AC_DEFINE(TINYX_NO_FONTS, 1,
+              [Build without a font backend; the server cannot complete startup.])
+    AC_MSG_WARN([fonts are disabled; binaries will link but cannot complete server startup])
+fi
 
 AM_CONDITIONAL(SCREENSAVER, [test "x$SCREENSAVER" = xyes])
 if test "x$SCREENSAVER" = xyes; then
@@ -456,7 +468,12 @@ MIEXT_SHADOW_LIB='$(top_builddir)/miext/shadow/libshadow.la'
 CORE_INCS='-I$(top_srcdir)/include -I$(top_builddir)/include'
 
 PKG_CHECK_MODULES([XSERVERCFLAGS], [$REQUIRED_MODULES $REQUIRED_LIBS])
-PKG_CHECK_MODULES([XSERVERLIBS], [$REQUIRED_LIBS])
+if test -n "$REQUIRED_LIBS"; then
+    PKG_CHECK_MODULES([XSERVERLIBS], [$REQUIRED_LIBS])
+else
+    XSERVERLIBS_CFLAGS=""
+    XSERVERLIBS_LIBS=""
+fi
 
 XSERVER_CFLAGS="${XSERVERCFLAGS_CFLAGS}"
 XSERVER_LIBS="${XSERVERLIBS_LIBS} ${SYS_LIBS} -lm"

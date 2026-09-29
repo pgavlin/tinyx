@@ -185,6 +185,9 @@
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
 
+/* Build without a font backend; the server cannot complete startup. */
+#undef TINYX_NO_FONTS
+
 /* Support TCP socket connections */
 #undef TCPCONN
 

@@ -4,6 +4,10 @@ AM_CFLAGS = $(DIX_CFLAGS) \
 	-DVENDOR_STRING=\""@VENDOR_STRING@"\" \
 	-DVENDOR_RELEASE="@VENDOR_RELEASE@"
 
+if NO_XFONT
+FONT_BACKEND_SRCS = fontstubs.c
+endif
+
 libdix_la_SOURCES = 	\
 	atom.c		\
 	colormap.c	\
@@ -12,6 +16,7 @@ libdix_la_SOURCES = 	\
 	dispatch.c	\
 	dispatch.h	\
 	dixfonts.c	\
+	$(FONT_BACKEND_SRCS) \
 	dixutils.c	\
 	events.c	\
 	extension.c	\

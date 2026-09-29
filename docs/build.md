@@ -1,5 +1,21 @@
 I’d start with a **sidecar CMake build**, leaving Autoconf intact as a reference. Don’t try to convert the entire build system before understanding which code belongs in the embedded server.
 
+## Temporary build without libXfont
+
+The native build normally requires legacy libXfont 1 and libfontenc. During the
+embedding refactor it can instead build against local, build-only font stubs:
+
+```sh
+./configure --disable-fonts [other options]
+make
+```
+
+This configuration compiles and links without either font library, but it is
+not runnable: no font backend is registered, so generation initialization
+fails when the server opens its required `fixed` text font. The embedded
+`fixed` and `cursor` implementation planned for the font phase will replace
+these stubs. Do not treat `--disable-fonts` as a supported runtime mode.
+
 ## What Autoconf currently does
 
 Very roughly:
