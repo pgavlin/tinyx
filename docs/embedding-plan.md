@@ -37,6 +37,9 @@ protocol semantics and server state.
   runtime operations; native process behavior remains the default; custom
   hosts can run core calls inside a fatal-error boundary that poisons and
   unwinds the singleton instead of terminating the process.
+- **Phase 5 complete:** a KDrive memory backend renders a fixed depth-24,
+  32-bpp screen into allocated or host-provided linear memory and exposes
+  accumulated Damage regions without performing presentation.
 - **Temporary font configuration:** `--disable-fonts` permits build and link
   validation without libXfont. It intentionally cannot complete server
   startup and will be replaced in phase 7.
@@ -293,6 +296,27 @@ buffers can be added after the basic ownership model is proven.
 - drawing produces bounded dirty regions;
 - presenting or uploading pixels is not performed by the core;
 - native hardware backends remain available to native executables.
+
+### Implemented
+
+`kdrive/memory/` is a hardware-free KDrive backend. It accepts a borrowed
+linear buffer or allocates one for each active generation, configures FB for a
+single depth-24, 32-bpp TrueColor screen, and supplies no-op display power,
+mode, VT, and device-acquisition behavior. The existing `Xfbdev` and `Xvesa`
+frontends are unchanged.
+
+The provisional `include/tinyx-display.h` interface returns framebuffer
+metadata without exposing `KdScreenInfo`. Its native-endian pixel words use
+red, green, and blue masks `0x00ff0000`, `0x0000ff00`, and `0x000000ff`;
+on little-endian hosts this is byte order B, G, R, X.
+
+An internal Damage object tracks writes to the screen pixmap. Hosts consume
+current rectangles with `TinyXMemoryDisplayTakeDamage()`. If the caller's
+capacity cannot hold the region, the backend returns one bounding rectangle,
+so presentation metadata is always bounded by caller storage. The server does
+not upload, display, or otherwise interpret the pixels. `Xmemory` is built as
+a non-installed reference frontend; with the temporary no-font configuration
+it links but still fails later at default-font startup as documented.
 
 ## Phase 6: Add explicit input injection
 

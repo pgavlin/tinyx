@@ -13,7 +13,8 @@ endif
 SUBDIRS =			\
 	src			\
 	$(LINUX_SUBDIRS)	\
+	memory			\
 	$(FBDEV_SUBDIRS)	\
 	$(VESA_SUBDIRS)
 
-DIST_SUBDIRS = vesa fbdev src linux
+DIST_SUBDIRS = vesa fbdev memory src linux

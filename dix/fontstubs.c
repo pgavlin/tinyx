@@ -153,6 +153,17 @@ RemoveCachedFontPattern(FontPatternCachePtr cache, FontPtr font)
 }
 
 void
+GetGlyphs(FontPtr font, unsigned long count, unsigned char *chars,
+          FontEncoding encoding, unsigned long *glyphCount,
+          CharInfoPtr *glyphs)
+{
+    *glyphCount = 0;
+    if (font && font->get_glyphs)
+        (void)(*font->get_glyphs)(font, count, chars, encoding,
+                                 glyphCount, glyphs);
+}
+
+void
 QueryGlyphExtents(FontPtr font, CharInfoPtr *charinfo, unsigned long count,
                   ExtentInfoPtr info)
 {

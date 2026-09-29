@@ -859,6 +859,22 @@ than returning through an invalid core stack or terminating the host process.
 The poisoned singleton cannot process further operations. Native calls retain
 the traditional DDX cleanup and process termination behavior.
 
+### Memory display and presentation
+
+`kdrive/memory/` supplies a KDrive card whose framebuffer is ordinary linear
+memory rather than mapped display hardware. A host may provide the storage or
+let the backend allocate it for the active generation. The initial format is
+depth-24 TrueColor in 32 native-endian bits per pixel, with red, green, and
+blue masks `0x00ff0000`, `0x0000ff00`, and `0x000000ff`. FB and MI render into
+this buffer through the same `ScreenRec` operations used by native backends.
+
+The provisional `tinyx-display.h` interface exposes dimensions, stride, masks,
+and the pixel pointer without exposing `KdScreenInfo`. A Damage object attached
+to the screen pixmap accumulates changed regions. The host drains those regions
+at a step boundary; when caller storage is too small, they collapse to one
+bounding rectangle. No core code performs window-system presentation or pixel
+upload. The native fbdev and VESA backends remain separate and unchanged.
+
 ### Shadow framebuffers
 
 `miext/shadow/` supports rendering into shadow memory and copying transformed

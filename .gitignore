@@ -35,7 +35,10 @@ stamp-h?
 do-not-use-config.h
 do-not-use-config.h.in
 kdrive/fbdev/Xfbdev
+kdrive/memory/Xmemory
 kdrive/vesa/Xvesa
+os/host-runtime-test
+os/host-runtime-test.log
 include/dix-config.h
 include/kdrive-config.h
 include/xkb-config.h

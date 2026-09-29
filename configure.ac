@@ -689,6 +689,7 @@ xfixes/Makefile
 kdrive/Makefile
 kdrive/fbdev/Makefile
 kdrive/linux/Makefile
+kdrive/memory/Makefile
 kdrive/src/Makefile
 kdrive/vesa/Makefile
 ])
