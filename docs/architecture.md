@@ -875,6 +875,26 @@ at a step boundary; when caller storage is too small, they collapse to one
 bounding rectangle. No core code performs window-system presentation or pixel
 upload. The native fbdev and VESA backends remain separate and unchanged.
 
+### Host input injection
+
+The provisional `tinyx-input.h` interface injects absolute root coordinates,
+relative pointer deltas, button transitions, and X keycode transitions into the
+KDrive devices without opening input descriptors. KDrive maintains device
+state and passes injected events through MI's event queue and ordinary DIX
+delivery, preserving focus, grabs, propagation, pointer acceleration, button
+mapping, and middle-button emulation. Enqueuing input requests a cooperative
+host wakeup.
+
+The memory keyboard supplies the conventional US Xorg keymap (evdev keycode
+plus 8) for X keycodes 8 through 247. Translation from DOM codes, SDL scan
+codes, evdev codes, or symbols is a host responsibility. Repeat timing is also
+host-owned: repeated press input is
+filtered through the active X keyboard repeat controls. The memory pointer has
+five X buttons. Optional callbacks expose X bell and LED changes to the host;
+the core does not choose an audio or physical LED implementation. Native Linux
+input acquisition continues to call the same lower-level KDrive enqueue
+functions.
+
 ### Shadow framebuffers
 
 `miext/shadow/` supports rendering into shadow memory and copying transformed

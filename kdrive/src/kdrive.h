@@ -359,6 +359,10 @@ void KdEnqueueMotionEvent(KdMouseInfo * mi, int x, int y);
 
 void KdReleaseAllKeys(void);
 
+/* Memory-host keyboard effect adapters implemented by kinput.c. */
+void TinyXInputNotifyLeds(unsigned int leds);
+void TinyXInputNotifyBell(int volume, int pitch, int duration);
+
 void KdSetLed(int led, Bool on);
 
 void KdSetMouseMatrix(KdMouseMatrix * matrix);

@@ -26,6 +26,8 @@
 #endif
 #include "kdrive.h"
 #include "inputstr.h"
+#include "tinyx-host.h"
+#include "tinyx-input.h"
 
 #define XK_PUBLISHING
 #include <X11/keysym.h>
@@ -33,6 +35,7 @@
 #include <X11/XF86keysym.h>
 #endif
 #include "kkeymap.h"
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 
@@ -49,6 +52,10 @@ static int kdBellPitch;
 static int kdBellDuration;
 
 static int kdLeds;
+static unsigned int kdLockedModifiers;
+
+static TinyXInputHostOps tinyxInputHostOps;
+static void *tinyxInputHostData;
 
 static Bool kdInputEnabled;
 
@@ -77,11 +84,38 @@ static KeySymsRec kdKeySyms;
 
 void KdResetInputMachine(void);
 
-#define KD_KEY_COUNT		248
+#define KD_KEY_COUNT		256
 
 CARD8 kdKeyState[KD_KEY_COUNT / 8];
 
 #define IsKeyDown(key) ((kdKeyState[(key) >> 3] >> ((key) & 7)) & 1)
+
+int
+TinyXInputSetHostOps(const TinyXInputHostOps *ops, void *userdata)
+{
+	if (TinyXHostIsPoisoned())
+		return 0;
+	if (ops)
+		tinyxInputHostOps = *ops;
+	else
+		memset(&tinyxInputHostOps, 0, sizeof(tinyxInputHostOps));
+	tinyxInputHostData = userdata;
+	return 1;
+}
+
+void
+TinyXInputNotifyLeds(unsigned int leds)
+{
+	if (tinyxInputHostOps.ledsChanged)
+		tinyxInputHostOps.ledsChanged(tinyxInputHostData, leds);
+}
+
+void
+TinyXInputNotifyBell(int volume, int pitch, int duration)
+{
+	if (tinyxInputHostOps.bell)
+		tinyxInputHostOps.bell(tinyxInputHostData, volume, pitch, duration);
+}
 
 #define KD_MAX_INPUT_FDS    8
 
@@ -554,6 +588,7 @@ void KdInitInput(const KdMouseFuncs * const pMouseFuncs,
 	KdAddMouseDriver(pMouseFuncs);
 	kdKeyboardFuncs = pKeyboardFuncs;
 	memset(kdKeyState, '\0', sizeof(kdKeyState));
+	kdLockedModifiers = 0;
 	if (kdKeyboardFuncs)
 		(*kdKeyboardFuncs->Load) ();
 	kdMinKeyCode = kdMinScanCode + KD_KEY_OFFSET;
@@ -1160,13 +1195,13 @@ static void KdHandleKeyboardEvent(xEvent * ev)
 	KdQueueEvent(ev);
 }
 
-void KdReleaseAllKeys(void)
+static void
+KdReleaseAllKeysInternal(void)
 {
 	xEvent xE;
-
 	int key;
 
-	KdBlockSigio();
+	memset(&xE, 0, sizeof(xE));
 	for (key = 0; key < KD_KEY_COUNT; key++)
 		if (IsKeyDown(key)) {
 			xE.u.keyButtonPointer.time = GetTimeInMillis();
@@ -1174,7 +1209,23 @@ void KdReleaseAllKeys(void)
 			xE.u.u.detail = key;
 			KdHandleKeyboardEvent(&xE);
 		}
+}
+
+void KdReleaseAllKeys(void)
+{
+	KdBlockSigio();
+	KdReleaseAllKeysInternal();
 	KdUnblockSigio();
+}
+
+int
+TinyXInputReleaseAllKeys(void)
+{
+	if (!pKdKeyboard || TinyXHostIsPoisoned())
+		return 0;
+	KdReleaseAllKeysInternal();
+	TinyXHostWakeup();
+	return 1;
 }
 
 static void KdCheckLock(void)
@@ -1244,80 +1295,82 @@ static unsigned char remap(const unsigned char scan) {
 	return scan;
 }
 
-void KdEnqueueKeyboardEvent(unsigned char scan_code, unsigned char is_up)
+static int
+KdEnqueueKeyCode(unsigned int key_code, unsigned char is_up)
 {
-	unsigned char key_code;
-	static unsigned int locks = 0;
-
 	xEvent xE;
 	KeyClassPtr keyc;
 
-	if (!pKdKeyboard)
-		return;
+	if (!pKdKeyboard || key_code >= KD_KEY_COUNT ||
+	    key_code < (unsigned int)kdMinKeyCode ||
+	    key_code > (unsigned int)kdMaxKeyCode)
+		return 0;
 
 	keyc = pKdKeyboard->key;
+	memset(&xE, 0, sizeof(xE));
 	xE.u.keyButtonPointer.time = GetTimeInMillis();
+	xE.u.u.type = is_up ? KeyRelease : KeyPress;
+	xE.u.u.detail = key_code;
 
-	if (!(locks & Mod2Mask))
-		scan_code = remap(scan_code);
-
-	if (kdMinScanCode <= scan_code && scan_code <= kdMaxScanCode) {
-		key_code = scan_code + KD_MIN_KEYCODE - kdMinScanCode;
-
-		/*
-		 * Set up this event -- the type may be modified below
-		 */
-		if (is_up)
-			xE.u.u.type = KeyRelease;
-		else
-			xE.u.u.type = KeyPress;
-		xE.u.u.detail = key_code;
-
-		// Handle toggling keys
-		if (xE.u.u.type == KeyPress) {
-			switch (KEYCOL1(key_code)) {
-				case XK_Num_Lock:
-					locks ^= Mod2Mask;
-				break;
-				case XK_Shift_Lock:
-				case XK_Caps_Lock:
-					locks ^= LockMask;
-				break;
-			}
+	/* Preserve KDrive's lock-key and host-generated repeat semantics. */
+	if (xE.u.u.type == KeyPress) {
+		switch (KEYCOL1(key_code)) {
+		case XK_Num_Lock:
+			kdLockedModifiers ^= Mod2Mask;
+			break;
+		case XK_Shift_Lock:
+		case XK_Caps_Lock:
+			kdLockedModifiers ^= LockMask;
+			break;
 		}
-		keyc->state |= locks;
-
-		/*
-		 * Check pressed keys which are already down
-		 */
-		if (IsKeyDown(key_code) && xE.u.u.type == KeyPress) {
-			KeybdCtrl *ctrl = &pKdKeyboard->kbdfeed->ctrl;
-
-			/*
-			 * Check auto repeat
-			 */
-			if (!ctrl->autoRepeat || keyc->modifierMap[key_code] ||
-			    !(ctrl->
-			      autoRepeats[key_code >> 3] & (1 <<
-							    (key_code & 7)))) {
-				return;
-			}
-			/*
-			 * X delivers press/release even for autorepeat
-			 */
-			xE.u.u.type = KeyRelease;
-			KdHandleKeyboardEvent(&xE);
-			xE.u.u.type = KeyPress;
-		}
-		/*
-		 * Check released keys which are already up
-		 */
-		else if (!IsKeyDown(key_code) && xE.u.u.type == KeyRelease) {
-			return;
-		}
-		KdCheckSpecialKeys(&xE);
-		KdHandleKeyboardEvent(&xE);
 	}
+	keyc->state |= kdLockedModifiers;
+
+	if (IsKeyDown(key_code) && xE.u.u.type == KeyPress) {
+		KeybdCtrl *ctrl = &pKdKeyboard->kbdfeed->ctrl;
+
+		if (!ctrl->autoRepeat || keyc->modifierMap[key_code] ||
+		    !(ctrl->autoRepeats[key_code >> 3] &
+		      (1 << (key_code & 7))))
+			return 1;
+
+		/* X represents a repeated press as a release/press pair. */
+		xE.u.u.type = KeyRelease;
+		KdHandleKeyboardEvent(&xE);
+		xE.u.u.type = KeyPress;
+	}
+	else if (!IsKeyDown(key_code) && xE.u.u.type == KeyRelease) {
+		return 1;
+	}
+
+	KdCheckSpecialKeys(&xE);
+	KdHandleKeyboardEvent(&xE);
+	TinyXHostWakeup();
+	return 1;
+}
+
+void KdEnqueueKeyboardEvent(unsigned char scan_code, unsigned char is_up)
+{
+	unsigned int key_code;
+
+	if (!(kdLockedModifiers & Mod2Mask))
+		scan_code = remap(scan_code);
+	if (scan_code < kdMinScanCode || scan_code > kdMaxScanCode)
+		return;
+
+	key_code = scan_code + KD_MIN_KEYCODE - kdMinScanCode;
+	(void)KdEnqueueKeyCode(key_code, is_up);
+}
+
+int
+TinyXInputKey(uint32_t keycode, int pressed)
+{
+	int result;
+
+	if (TinyXHostIsPoisoned())
+		return 0;
+	result = KdEnqueueKeyCode(keycode, !pressed);
+	return result;
 }
 
 #define SetButton(mi, b, v, s) \
@@ -1343,9 +1396,10 @@ static void KdMouseAccelerate(DeviceIntPtr device, int *dx, int *dy)
 {
 	PtrCtrl *pCtrl = &device->ptrfeed->ctrl;
 
-	double speed = sqrt(*dx * *dx + *dy * *dy);
+	double speed = sqrt((double)*dx * *dx + (double)*dy * *dy);
 
 	double accel;
+	double acceleratedX, acceleratedY;
 
 #ifdef QUADRATIC_ACCELERATION
 	double m;
@@ -1369,8 +1423,12 @@ static void KdMouseAccelerate(DeviceIntPtr device, int *dx, int *dy)
 	if (speed > pCtrl->threshold)
 		accel = (double)pCtrl->num / pCtrl->den;
 #endif
-	*dx = accel * *dx;
-	*dy = accel * *dy;
+	acceleratedX = accel * *dx;
+	acceleratedY = accel * *dy;
+	*dx = acceleratedX > INT_MAX ? INT_MAX :
+	    acceleratedX < INT_MIN ? INT_MIN : acceleratedX;
+	*dy = acceleratedY > INT_MAX ? INT_MAX :
+	    acceleratedY < INT_MIN ? INT_MIN : acceleratedY;
 }
 
 void KdEnqueueMouseEvent(KdMouseInfo * mi, unsigned long flags, int rx, int ry)
@@ -1437,6 +1495,76 @@ void KdEnqueueMouseEvent(KdMouseInfo * mi, unsigned long flags, int rx, int ry)
 		}
 	}
 	mi->buttonState = buttons;
+	TinyXHostWakeup();
+}
+
+static int
+TinyXInputPointerMotion(int x, int y, Bool relative)
+{
+	xEvent xE;
+	KdMouseInfo *mi = kdMouseInfo;
+
+	if (!pKdPointer || !mi || TinyXHostIsPoisoned())
+		return 0;
+
+	if (relative)
+		KdMouseAccelerate(pKdPointer, &x, &y);
+	x = x > SHRT_MAX ? SHRT_MAX : x < SHRT_MIN ? SHRT_MIN : x;
+	y = y > SHRT_MAX ? SHRT_MAX : y < SHRT_MIN ? SHRT_MIN : y;
+	memset(&xE, 0, sizeof(xE));
+	xE.u.u.type = MotionNotify;
+	xE.u.keyButtonPointer.time = GetTimeInMillis();
+	xE.u.keyButtonPointer.rootX = x;
+	xE.u.keyButtonPointer.rootY = y;
+	xE.u.keyButtonPointer.pad1 = relative ? 1 : 0;
+	KdHandleMouseEvent(mi, &xE);
+	TinyXHostWakeup();
+	return 1;
+}
+
+int
+TinyXInputPointerMotionAbsolute(int32_t x, int32_t y)
+{
+	return TinyXInputPointerMotion(x, y, FALSE);
+}
+
+int
+TinyXInputPointerMotionRelative(int32_t dx, int32_t dy)
+{
+	return TinyXInputPointerMotion(dx, dy, TRUE);
+}
+
+int
+TinyXInputPointerButton(uint32_t button, int pressed)
+{
+	xEvent xE;
+	KdMouseInfo *mi = kdMouseInfo;
+	unsigned int mask;
+	int pointerX, pointerY;
+
+	if (!pKdPointer || !mi || TinyXHostIsPoisoned() || button == 0 ||
+	    button > (unsigned int)mi->nbutton || button > KD_MAX_BUTTON)
+		return 0;
+
+	mask = 1U << (button - 1);
+	if (!!(mi->buttonState & mask) == !!pressed)
+		return 1;
+
+	memset(&xE, 0, sizeof(xE));
+	xE.u.u.type = pressed ? ButtonPress : ButtonRelease;
+	xE.u.u.detail = mi->map[button - 1];
+	xE.u.keyButtonPointer.time = GetTimeInMillis();
+	miPointerPosition(&pointerX, &pointerY);
+	xE.u.keyButtonPointer.rootX = pointerX;
+	xE.u.keyButtonPointer.rootY = pointerY;
+
+	KdHandleMouseEvent(mi, &xE);
+	if (pressed)
+		mi->buttonState |= mask;
+	else
+		mi->buttonState &= ~mask;
+	TinyXHostWakeup();
+	return 1;
 }
 
 void KdEnqueueMotionEvent(KdMouseInfo * mi, int x, int y)
@@ -1453,6 +1581,7 @@ void KdEnqueueMotionEvent(KdMouseInfo * mi, int x, int y)
 	xE.u.keyButtonPointer.rootY = y;
 
 	KdHandleMouseEvent(mi, &xE);
+	TinyXHostWakeup();
 }
 
 void

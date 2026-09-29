@@ -40,6 +40,9 @@ protocol semantics and server state.
 - **Phase 5 complete:** a KDrive memory backend renders a fixed depth-24,
   32-bpp screen into allocated or host-provided linear memory and exposes
   accumulated Damage regions without performing presentation.
+- **Phase 6 complete:** hosts can inject absolute or relative pointer motion,
+  button transitions, and X keycode transitions without descriptors; events
+  retain the ordinary KDrive, MI, and DIX path and wake cooperative hosts.
 - **Temporary font configuration:** `--disable-fonts` permits build and link
   validation without libXfont. It intentionally cannot complete server
   startup and will be replaced in phase 7.
@@ -348,6 +351,32 @@ can live above it.
 - injected events traverse the ordinary MI and DIX event path;
 - native Linux acquisition can continue to feed the same server-side path;
 - keyboard representation and repeat ownership are documented.
+
+### Implemented
+
+`include/tinyx-input.h` defines provisional singleton injection operations for
+absolute root-screen motion, accelerated relative motion, button transitions,
+and key transitions. Injection requires no input descriptor and requests a
+host wakeup after adding work. KDrive continues to update pointer and keyboard
+state and feeds the existing MI event queue, so focus, grabs, propagation, and
+client delivery are unchanged. Linux keyboard and mouse drivers continue to
+use the same KDrive enqueue path.
+
+The memory keyboard has a stable conventional US Xorg keymap (evdev keycode
+plus 8) and accepts X keycodes 8 through 247. Host integrations translate
+DOM, SDL, evdev, or other host key identifiers into those keycodes. The host
+owns repeat timing: a repeated press for an already-down key is interpreted by
+KDrive using the active X keyboard
+controls and, when repeat is enabled, becomes the traditional release/press
+pair. Hosts should balance transitions or call `TinyXInputReleaseAllKeys()`
+when focus is lost.
+
+The memory pointer exposes five X buttons. Absolute coordinates are X root
+coordinates and are clamped by MI; relative deltas retain X pointer
+acceleration. Existing KDrive middle-button emulation and button mapping remain
+in the event path. Optional LED and bell callbacks make those effects host
+policy rather than requiring a native console device. The interface remains
+non-thread-safe and non-reentrant and will be wrapped by the phase 8 facade.
 
 ## Phase 7: Isolate font acquisition
 
