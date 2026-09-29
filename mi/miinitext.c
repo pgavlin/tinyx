@@ -90,8 +90,6 @@ typedef void (*InitExtension)(INITARGS);
 
 #define _XSHM_SERVER_
 #include <X11/extensions/shmstr.h>
-#define _XTEST_SERVER_
-#include <X11/extensions/XTest.h>
 #ifdef XF86BIGFONT
 #include <X11/extensions/xf86bigfproto.h>
 #endif

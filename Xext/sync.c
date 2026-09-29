@@ -65,7 +65,6 @@ PERFORMANCE OF THIS SOFTWARE.
 #include "resource.h"
 #include "opaque.h"
 #define _SYNC_SERVER
-#include <X11/extensions/sync.h>
 #include <X11/extensions/syncstr.h>
 
 #include <stdio.h>
