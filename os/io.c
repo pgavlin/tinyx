@@ -61,13 +61,7 @@ SOFTWARE.
 #define DEBUG_COMMUNICATION
 #endif
 #include <stdio.h>
-#define XSERV_t
-#define TRANS_SERVER
-#define TRANS_REOPEN
-#include <X11/Xtrans/Xtrans.h>
 #include <X11/Xmd.h>
-#include <errno.h>
-#include <sys/uio.h>
 #include <X11/X.h>
 #include <X11/Xproto.h>
 #include "os.h"
@@ -79,19 +73,6 @@ SOFTWARE.
 
 _X_EXPORT CallbackListPtr       ReplyCallback;
 _X_EXPORT CallbackListPtr       FlushCallback;
-
-/* check for both EAGAIN and EWOULDBLOCK, because some supposedly POSIX
- * systems are broken and return EWOULDBLOCK when they should return EAGAIN
- */
-#if defined(EAGAIN) && defined(EWOULDBLOCK)
-#define ETEST(err) (err == EAGAIN || err == EWOULDBLOCK)
-#else
-#ifdef EAGAIN
-#define ETEST(err) (err == EAGAIN)
-#else
-#define ETEST(err) (err == EWOULDBLOCK)
-#endif
-#endif
 
 Bool CriticalOutputPending;
 int timesThisConnection = 0;
@@ -172,7 +153,7 @@ OsCommPtr AvailableInput = (OsCommPtr)NULL;
 	  timesThisConnection = 0; }
 #define YieldControlNoInput()			\
         { YieldControl();			\
-	  FD_CLR(fd, &ClientsWithInput); }
+          OsCommSetInputReady(oc, FALSE); }
 #define YieldControlDeath()			\
         { timesThisConnection = 0; }
 
@@ -181,9 +162,9 @@ ReadRequestFromClient(ClientPtr client)
 {
     OsCommPtr oc = (OsCommPtr)client->osPrivate;
     ConnectionInputPtr oci = oc->input;
-    int fd = oc->fd;
     unsigned int gotnow, needed;
-    int result;
+    size_t bytesRead;
+    TinyXTransportResult readResult;
     xReq *request;
     Bool need_header;
     Bool move_header;
@@ -308,35 +289,20 @@ ReadRequestFromClient(ClientPtr client)
 	    oci->bufptr = oci->buffer;
 	    oci->bufcnt = gotnow;
 	}
-	/*  XXX this is a workaround.  This function is sometimes called
-	 *  after the trans_conn has been freed.  In this case trans_conn
-	 *  will be null.  Really ought to restructure things so that we
-	 *  never get here in those circumstances.
-	 */
-	if (!oc->trans_conn)
+	readResult = TinyXTransportRead(oc, oci->buffer + oci->bufcnt,
+                                    oci->size - oci->bufcnt, &bytesRead);
+	if (readResult != TINYX_TRANSPORT_PROGRESS)
 	{
-	    /*  treat as if an error occured on the read, which is what
-	     *  used to happen
-	     */
-	    YieldControlDeath();
-	    return -1;
-	}
-	    result = _XSERVTransRead(oc->trans_conn, oci->buffer + oci->bufcnt,
-				     oci->size - oci->bufcnt);
-	if (result <= 0)
-	{
-	    if ((result < 0) && ETEST(errno))
+	    if (readResult == TINYX_TRANSPORT_WOULD_BLOCK)
 	    {
-		{
-		    YieldControlNoInput();
-		    return 0;
-		}
+		YieldControlNoInput();
+		return 0;
 	    }
 	    YieldControlDeath();
 	    return -1;
 	}
-	oci->bufcnt += result;
-	gotnow += result;
+	oci->bufcnt += bytesRead;
+	gotnow += bytesRead;
 	/* free up some space after huge requests */
 	if ((oci->size > BUFWATERMARK) &&
 	    (oci->bufcnt < BUFSIZE) && (needed < BUFSIZE))
@@ -395,18 +361,18 @@ ReadRequestFromClient(ClientPtr client)
     if (gotnow >= sizeof(xReq))
     {
 	request = (xReq *)(oci->bufptr + needed);
-	if (gotnow >= (result = (get_req_len(request, client) << 2))
-	    && (result ||
+	if (gotnow >= (needed = (get_req_len(request, client) << 2))
+	    && (needed ||
 		(client->big_requests &&
 		 (gotnow >= sizeof(xBigReq) &&
 		  gotnow >= (get_big_req_len(request, client) << 2))))
 	    )
-	    FD_SET(fd, &ClientsWithInput);
+	    OsCommSetInputReady(oc, TRUE);
 	else
 	{
 #ifdef SMART_SCHEDULE
 	    if (!SmartScheduleDisable)
-		FD_CLR(fd, &ClientsWithInput);
+                OsCommSetInputReady(oc, FALSE);
 	    else
 #endif
 		YieldControlNoInput();
@@ -418,7 +384,7 @@ ReadRequestFromClient(ClientPtr client)
 	    AvailableInput = oc;
 #ifdef SMART_SCHEDULE
 	if (!SmartScheduleDisable)
-	    FD_CLR(fd, &ClientsWithInput);
+            OsCommSetInputReady(oc, FALSE);
 	else
 #endif
 	    YieldControlNoInput();
@@ -458,7 +424,6 @@ InsertFakeRequest(ClientPtr client, char *data, int count)
 {
     OsCommPtr oc = (OsCommPtr)client->osPrivate;
     ConnectionInputPtr oci = oc->input;
-    int fd = oc->fd;
     int gotnow, moveup;
 
     if (AvailableInput)
@@ -515,7 +480,7 @@ InsertFakeRequest(ClientPtr client, char *data, int count)
     gotnow += count;
     if ((gotnow >= sizeof(xReq)) &&
 	(gotnow >= (int)(get_req_len((xReq *)oci->bufptr, client) << 2)))
-	FD_SET(fd, &ClientsWithInput);
+	OsCommSetInputReady(oc, TRUE);
     else
 	YieldControlNoInput();
     return(TRUE);
@@ -532,7 +497,6 @@ ResetCurrentRequest(ClientPtr client)
 {
     OsCommPtr oc = (OsCommPtr)client->osPrivate;
     ConnectionInputPtr oci = oc->input;
-    int fd = oc->fd;
     xReq *request;
     int gotnow, needed;
     if (AvailableInput == oc)
@@ -559,14 +523,12 @@ ResetCurrentRequest(ClientPtr client)
 	}
 	if (gotnow >= (needed << 2))
 	{
-	    if (FD_ISSET(fd, &AllClients))
-	    {
-		FD_SET(fd, &ClientsWithInput);
-	    }
+            if (oc->fd < 0)
+                OsCommSetInputReady(oc, TRUE);
+	    else if (FD_ISSET(oc->fd, &AllClients))
+		OsCommSetInputReady(oc, TRUE);
 	    else
-	    {
-		FD_SET(fd, &IgnoredClientsWithInput);
-	    }
+		FD_SET(oc->fd, &IgnoredClientsWithInput);
 	    YieldControl();
 	}
 	else
@@ -591,8 +553,7 @@ static int padlength[4] = {0, 3, 2, 1};
 void
 FlushAllOutput(void)
 {
-    int index, base;
-    fd_mask mask; /* raphael */
+    int index;
     OsCommPtr oc;
     ClientPtr client;
     Bool newoutput = NewOutputPending;
@@ -611,28 +572,23 @@ FlushAllOutput(void)
     CriticalOutputPending = FALSE;
     NewOutputPending = FALSE;
 
-    for (base = 0; base < howmany(XFD_SETSIZE, NFDBITS); base++)
+    FD_ZERO(&OutputPending);
+    for (index = 1; index < currentMaxClients; index++)
     {
-	mask = OutputPending.fds_bits[ base ];
-	OutputPending.fds_bits[ base ] = 0;
-	while (mask)
-	{
-	    index = ffs(mask) - 1;
-	    mask &= ~lowbit(mask);
-	    if ((index = ConnectionTranslation[(base * (sizeof(fd_mask)*8)) + index]) == 0)
-		continue;
-	    client = clients[index];
-	    if (client->clientGone)
-		continue;
-	    oc = (OsCommPtr)client->osPrivate;
-	    if (FD_ISSET(oc->fd, &ClientsWithInput))
-	    {
-		FD_SET(oc->fd, &OutputPending); /* set the bit again */
-		NewOutputPending = TRUE;
-	    }
-	    else
-		(void)FlushClient(client, oc, (char *)NULL, 0);
-	}
+        client = clients[index];
+        if (!client || client->clientGone)
+            continue;
+        oc = (OsCommPtr)client->osPrivate;
+        if (!oc->outputPending)
+            continue;
+        OsCommSetOutputPending(oc, FALSE);
+        if (oc->inputReady)
+        {
+            OsCommSetOutputPending(oc, TRUE);
+            NewOutputPending = TRUE;
+        }
+        else
+            (void)FlushClient(client, oc, (char *)NULL, 0);
     }
 }
 
@@ -719,11 +675,7 @@ WriteToClient (ClientPtr who, int count, const char *buf)
 	}
 	else if (!(oco = AllocateOutputBuffer()))
 	{
-	    if (oc->trans_conn) {
-		_XSERVTransDisconnect(oc->trans_conn);
-		_XSERVTransClose(oc->trans_conn);
-		oc->trans_conn = NULL;
-	    }
+            TinyXTransportClose(oc);
 	    MarkClientException(who);
 	    return -1;
 	}
@@ -775,16 +727,12 @@ WriteToClient (ClientPtr who, int count, const char *buf)
 #endif
     if (oco->count == 0 || oco->count + count + padBytes > oco->size)
     {
-	FD_CLR(oc->fd, &OutputPending);
-	if(!XFD_ANYSET(&OutputPending)) {
-	  CriticalOutputPending = FALSE;
-	  NewOutputPending = FALSE;
-	}
+        OsCommSetOutputPending(oc, FALSE);
 	return FlushClient(who, oc, buf, count);
     }
 
     NewOutputPending = TRUE;
-    FD_SET(oc->fd, &OutputPending);
+    OsCommSetOutputPending(oc, TRUE);
     memmove((char *)oco->buf + oco->count, buf, count);
     oco->count += count + padBytes;
     return(count);
@@ -804,165 +752,65 @@ int
 FlushClient(ClientPtr who, OsCommPtr oc, const char *extraBuf, int extraCount)
 {
     ConnectionOutputPtr oco = oc->output;
-    int connection = oc->fd;
-    XtransConnInfo trans_conn = oc->trans_conn;
-    struct iovec iov[3];
-    static char padBuffer[3];
-    long written;
-    long padsize;
-    long notWritten;
-    long todo;
+    int padsize = padlength[extraCount & 3];
+    int required;
 
     if (!oco)
-	return 0;
-    written = 0;
-    padsize = padlength[extraCount & 3];
-    notWritten = oco->count + extraCount + padsize;
-    todo = notWritten;
-    while (notWritten) {
-	long before = written;	/* amount of whole thing written */
-	long remain = todo;	/* amount to try this time, <= notWritten */
-	int i = 0;
-	long len;
+        return 0;
 
-	/* You could be very general here and have "in" and "out" iovecs
-	 * and write a loop without using a macro, but what the heck.  This
-	 * translates to:
-	 *
-	 *     how much of this piece is new?
-	 *     if more new then we are trying this time, clamp
-	 *     if nothing new
-	 *         then bump down amount already written, for next piece
-	 *         else put new stuff in iovec, will need all of next piece
-	 *
-	 * Note that todo had better be at least 1 or else we'll end up
-	 * writing 0 iovecs.
-	 */
-#define InsertIOV(pointer, length) \
-	len = (length) - before; \
-	if (len > remain) \
-	    len = remain; \
-	if (len <= 0) { \
-	    before = (-len); \
-	} else { \
-	    iov[i].iov_len = len; \
-	    iov[i].iov_base = (pointer) + before; \
-	    i++; \
-	    remain -= len; \
-	    before = 0; \
-	}
-
-	InsertIOV ((char *)oco->buf, oco->count)
-	InsertIOV ((char *)extraBuf, extraCount)
-	InsertIOV (padBuffer, padsize)
-
-	errno = 0;
-	if (trans_conn && (len = _XSERVTransWritev(trans_conn, iov, i)) >= 0)
-	{
-	    written += len;
-	    notWritten -= len;
-	    todo = notWritten;
-	}
-	else if (ETEST(errno)
-#ifdef EMSGSIZE /* check for another brain-damaged OS bug */
-		 || ((errno == EMSGSIZE) && (todo == 1))
-#endif
-		)
-	{
-	    /* If we've arrived here, then the client is stuffed to the gills
-	       and not ready to accept more.  Make a note of it and buffer
-	       the rest. */
-	    FD_SET(connection, &ClientsWriteBlocked);
-	    AnyClientsWriteBlocked = TRUE;
-
-	    if (written < oco->count)
-	    {
-		if (written > 0)
-		{
-		    oco->count -= written;
-		    memmove((char *)oco->buf,
-			    (char *)oco->buf + written,
-			  oco->count);
-		    written = 0;
-		}
-	    }
-	    else
-	    {
-		written -= oco->count;
-		oco->count = 0;
-	    }
-
-	    if (notWritten > oco->size)
-	    {
-		unsigned char *obuf;
-
-		obuf = (unsigned char *)realloc(oco->buf,
-						 notWritten + BUFSIZE);
-		if (!obuf)
-		{
-		    _XSERVTransDisconnect(oc->trans_conn);
-		    _XSERVTransClose(oc->trans_conn);
-		    oc->trans_conn = NULL;
-		    MarkClientException(who);
-		    oco->count = 0;
-		    return(-1);
-		}
-		oco->size = notWritten + BUFSIZE;
-		oco->buf = obuf;
-	    }
-
-	    /* If the amount written extended into the padBuffer, then the
-	       difference "extraCount - written" may be less than 0 */
-	    if ((len = extraCount - written) > 0)
-		memmove ((char *)oco->buf + oco->count,
-			 extraBuf + written,
-		       len);
-
-	    oco->count = notWritten; /* this will include the pad */
-	    /* return only the amount explicitly requested */
-	    return extraCount;
-	}
-#ifdef EMSGSIZE /* check for another brain-damaged OS bug */
-	else if (errno == EMSGSIZE)
-	{
-	    todo >>= 1;
-	}
-#endif
-	else
-	{
-	    if (oc->trans_conn)
-	    {
-		_XSERVTransDisconnect(oc->trans_conn);
-		_XSERVTransClose(oc->trans_conn);
-		oc->trans_conn = NULL;
-	    }
-	    MarkClientException(who);
-	    oco->count = 0;
-	    return(-1);
-	}
+    required = oco->count + extraCount + padsize;
+    if (required > oco->size) {
+        unsigned char *buffer = realloc(oco->buf, required + BUFSIZE);
+        if (!buffer) {
+            TinyXTransportClose(oc);
+            MarkClientException(who);
+            oco->count = 0;
+            return -1;
+        }
+        oco->buf = buffer;
+        oco->size = required + BUFSIZE;
+    }
+    if (extraCount) {
+        memcpy(oco->buf + oco->count, extraBuf, extraCount);
+        oco->count += extraCount;
+    }
+    if (padsize) {
+        memset(oco->buf + oco->count, 0, padsize);
+        oco->count += padsize;
     }
 
-    /* everything was flushed out */
-    oco->count = 0;
-    /* check to see if this client was write blocked */
-    if (AnyClientsWriteBlocked)
-    {
-	FD_CLR(oc->fd, &ClientsWriteBlocked);
- 	if (! XFD_ANYSET(&ClientsWriteBlocked))
-	    AnyClientsWriteBlocked = FALSE;
+    while (oco->count) {
+        size_t written = 0;
+        TinyXTransportResult result =
+            TinyXTransportWrite(oc, oco->buf, oco->count, &written);
+
+        if (result == TINYX_TRANSPORT_PROGRESS && written) {
+            oco->count -= written;
+            if (oco->count)
+                memmove(oco->buf, oco->buf + written, oco->count);
+            continue;
+        }
+        if (result == TINYX_TRANSPORT_WOULD_BLOCK) {
+            OsCommSetWriteBlocked(oc, TRUE);
+            return extraCount;
+        }
+        TinyXTransportClose(oc);
+        MarkClientException(who);
+        oco->count = 0;
+        return -1;
     }
-    if (oco->size > BUFWATERMARK)
-    {
-	free(oco->buf);
-	free(oco);
+
+    OsCommSetWriteBlocked(oc, FALSE);
+    if (oco->size > BUFWATERMARK) {
+        free(oco->buf);
+        free(oco);
     }
-    else
-    {
-	oco->next = FreeOutputs;
-	FreeOutputs = oco;
+    else {
+        oco->next = FreeOutputs;
+        FreeOutputs = oco;
     }
     oc->output = (ConnectionOutputPtr)NULL;
-    return extraCount; /* return only the amount explicitly requested */
+    return extraCount;
 }
 
 ConnectionInputPtr

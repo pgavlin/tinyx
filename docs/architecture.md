@@ -534,9 +534,9 @@ from one client before yielding.
 This is both the server scheduler and the Unix event-loop implementation.
 `PollForSomething()` runs the same pending-work, timer, handler, output, and
 readiness machinery with a zero timeout. `TimerNextDelay()` reports the next
-timer deadline to a cooperative host. Descriptor polling is still native OS
-behavior and will move behind the transport/event-loop boundary in later
-phases.
+timer deadline to a cooperative host. Native descriptor readiness is combined
+with descriptor-free readiness reported by in-memory clients before DIX client
+priority and dispatch scheduling are applied.
 
 ### Reading a request
 
@@ -575,11 +575,15 @@ errors into protocol error packets with `SendErrorToClient()`.
 ### Writing replies and events
 
 Protocol code calls `WriteToClient()` in `os/io.c`. It adds required padding,
-buffers output, and eventually calls `FlushClient()`, which writes through
-Xtrans. If a socket would block, the remaining data stays buffered and the
-connection is included in the next writable `select()` set.
+buffers output, and eventually calls `FlushClient()`. `FlushClient()` writes
+through the `TinyXTransportOps` byte-stream interface and retains unwritten
+bytes when the adapter reports backpressure. The Xtrans adapter arranges for a
+writable `select()` wakeup; the memory adapter becomes writable when its host
+drains queued output.
 
-Replies, errors, and events all ultimately use this path.
+Replies, errors, and events all ultimately use this path. Transport operations
+report progress, would-block, orderly close, and failure explicitly, so framing
+and buffering do not inspect descriptors or `errno`.
 
 ## 8. Connection establishment
 
@@ -597,12 +601,17 @@ puts it in nonblocking mode, allocates an `OsCommRec`, and calls
 
 `OsCommRec` is the transport-facing portion of a client. It contains:
 
-- the file descriptor;
+- the optional native file descriptor;
 - input and output buffers;
 - authorization and connection timing state;
-- the Xtrans connection object.
+- byte-stream operations and adapter-private data;
+- readiness and backpressure state;
+- native-only Xtrans metadata used by access control.
 
-The pointer is stored in `ClientRec.osPrivate`.
+The pointer is stored in `ClientRec.osPrivate`. Native accepts install the
+Xtrans adapter. `TinyXMemoryClientOpen()` instead creates a descriptor-free
+logical client and still calls `NextAvailableClient()`, so both transports use
+the artificial initial request and normal DIX handshake.
 
 ### The artificial initial request
 

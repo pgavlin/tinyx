@@ -29,6 +29,10 @@ protocol semantics and server state.
   execution; bounded `TinyXServerStep()` is nonblocking; the native lifecycle
   retains blocking behavior; pending work and the next timer delay are
   reported to cooperative hosts.
+- **Phase 3 complete:** request framing and output buffering use an explicit
+  nonblocking byte-stream interface; Xtrans is an adapter; descriptor-free
+  memory clients can feed and drain arbitrary chunks through the same DIX
+  connection handshake and dispatch path.
 - **Temporary font configuration:** `--disable-fonts` permits build and link
   validation without libXfont. It intentionally cannot complete server
   startup and will be replaced in phase 7.
@@ -184,6 +188,25 @@ whose clients accept and produce arbitrary byte chunks.
 - output can be drained incrementally by an embedder;
 - opening and closing a logical client does not require a socket;
 - both native and memory clients use the same DIX handshake and dispatch path.
+
+### Implemented
+
+`os/transport.h` defines progress, would-block, closed, and failure results
+without using descriptors or `errno`. `os/transport.c` adapts native Xtrans
+connections. `os/io.c` now retains only framing, padding, buffering, and
+backpressure policy.
+
+`include/tinyx-memory.h` and `os/memory.c` add a provisional in-process client
+handle. Hosts can append arbitrary input fragments, drain arbitrary output
+sizes, signal end-of-input, and choose a bounded output queue to exercise
+backpressure. Memory readiness is merged with native readiness before DIX
+priority selection, and server grabs, ignored clients, request budgets, and
+round-robin dispatch apply to both kinds of client.
+
+The interface is intentionally provisional until the phase 13 embedding facade
+is frozen. In-process clients are trusted by their embedding host and bypass
+native peer-address authorization; native clients retain existing Xtrans
+access control.
 
 ## Phase 4: Define host runtime services
 

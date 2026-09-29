@@ -277,7 +277,7 @@ XdmAuthorizationValidate (unsigned char *plain, int length,
 		*reason = "Invalid XDM-AUTHORIZATION-1 key (failed NULL check)";
 	    return NULL;
 	}
-    if (xclient) {
+    if (xclient && ((OsCommPtr)xclient->osPrivate)->trans_conn) {
 	int family, addr_len;
 	Xtransaddr *addr;
 

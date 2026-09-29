@@ -993,6 +993,8 @@ _X_EXPORT Bool LocalClient(ClientPtr client)
     pointer		addr;
     HOST	*host;
 
+    if (!((OsCommPtr)client->osPrivate)->trans_conn)
+        return TRUE;
     if (!_XSERVTransGetPeerAddr (((OsCommPtr)client->osPrivate)->trans_conn,
 	&notused, &alen, &from))
     {
@@ -1060,6 +1062,8 @@ LocalClientCredAndGroups(ClientPtr client, int *pUid, int *pGid,
     if (client == NULL)
 	return -1;
     ci = ((OsCommPtr)client->osPrivate)->trans_conn;
+    if (!ci)
+        return -1;
     /* Most implementations can only determine peer credentials for Unix
      * domain sockets - Solaris getpeerucred can work with a bit more, so
      * we just let it tell us if the connection type is supported or not

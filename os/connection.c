@@ -473,10 +473,12 @@ ClientAuthorized(ClientPtr client,
     priv = (OsCommPtr)client->osPrivate;
     trans_conn = priv->trans_conn;
 
-    auth_id = CheckAuthorization (proto_n, auth_proto,
-				  string_n, auth_string, client, &reason);
+    /* In-process clients are admitted by the embedding host. */
+    auth_id = trans_conn ? CheckAuthorization(proto_n, auth_proto,
+                                               string_n, auth_string,
+                                               client, &reason) : (XID)0;
 
-    if (auth_id == (XID) ~0L)
+    if (trans_conn && auth_id == (XID) ~0L)
     {
 	if (
 	    _XSERVTransGetPeerAddr (trans_conn,
@@ -504,7 +506,7 @@ ClientAuthorized(ClientPtr client,
 		return "Client is not authorized to connect to Server";
 	}
     }
-    else if (auditTrailLevel > 1)
+    else if (trans_conn && auditTrailLevel > 1)
     {
 	if (_XSERVTransGetPeerAddr (trans_conn,
 	    &family, &fromlen, &from) != -1)
@@ -531,23 +533,24 @@ ClientAuthorized(ClientPtr client,
     return((char *)NULL);
 }
 
-static ClientPtr
-AllocNewConnection (XtransConnInfo trans_conn, int fd, CARD32 conn_time)
+ClientPtr
+AllocNewConnection(const TinyXTransportOps *ops, void *transportData,
+                   XtransConnInfo trans_conn, int fd, CARD32 conn_time)
 {
     OsCommPtr	oc;
     ClientPtr	client;
 
-    if (
-	fd >= lastfdesc
-	)
+    if (fd >= lastfdesc)
 	return NullClient;
-    oc = (OsCommPtr)malloc(sizeof(OsCommRec));
+    oc = (OsCommPtr)calloc(1, sizeof(OsCommRec));
     if (!oc)
 	return NullClient;
+    oc->transportOps = ops;
+    oc->transportData = transportData;
     oc->trans_conn = trans_conn;
+    if (trans_conn && !ops)
+        TinyXInitXtransTransport(oc, trans_conn);
     oc->fd = fd;
-    oc->input = (ConnectionInputPtr)NULL;
-    oc->output = (ConnectionOutputPtr)NULL;
     oc->auth_id = None;
     oc->conn_time = conn_time;
     if (!(client = NextAvailableClient((pointer)oc)))
@@ -555,16 +558,19 @@ AllocNewConnection (XtransConnInfo trans_conn, int fd, CARD32 conn_time)
 	free(oc);
 	return NullClient;
     }
-    ConnectionTranslation[fd] = client->index;
-    if (GrabInProgress)
-    {
-        FD_SET(fd, &SavedAllClients);
-        FD_SET(fd, &SavedAllSockets);
-    }
-    else
-    {
-        FD_SET(fd, &AllClients);
-        FD_SET(fd, &AllSockets);
+    oc->clientIndex = client->index;
+    if (fd >= 0) {
+        ConnectionTranslation[fd] = client->index;
+        if (GrabInProgress)
+        {
+            FD_SET(fd, &SavedAllClients);
+            FD_SET(fd, &SavedAllSockets);
+        }
+        else
+        {
+            FD_SET(fd, &AllClients);
+            FD_SET(fd, &AllSockets);
+        }
     }
 
 #ifdef DEBUG
@@ -573,6 +579,96 @@ AllocNewConnection (XtransConnInfo trans_conn, int fd, CARD32 conn_time)
 #endif
 
     return client;
+}
+
+void
+OsCommSetInputReady(OsCommPtr oc, Bool ready)
+{
+    oc->inputReady = ready;
+    if (oc->fd < 0)
+        return;
+    if (ready)
+        FD_SET(oc->fd, &ClientsWithInput);
+    else
+        FD_CLR(oc->fd, &ClientsWithInput);
+}
+
+void
+OsCommSetOutputPending(OsCommPtr oc, Bool pending)
+{
+    oc->outputPending = pending;
+    if (oc->fd < 0)
+        return;
+    if (pending)
+        FD_SET(oc->fd, &OutputPending);
+    else
+        FD_CLR(oc->fd, &OutputPending);
+}
+
+void
+OsCommSetWriteBlocked(OsCommPtr oc, Bool blocked)
+{
+    oc->writeBlocked = blocked;
+    if (oc->fd >= 0) {
+        if (blocked)
+            FD_SET(oc->fd, &ClientsWriteBlocked);
+        else
+            FD_CLR(oc->fd, &ClientsWriteBlocked);
+    }
+    if (blocked)
+        AnyClientsWriteBlocked = TRUE;
+    else if (!XFD_ANYSET(&ClientsWriteBlocked)) {
+        int i;
+        AnyClientsWriteBlocked = FALSE;
+        for (i = 1; i < currentMaxClients; i++) {
+            if (clients[i] && ((OsCommPtr)clients[i]->osPrivate)->writeBlocked) {
+                AnyClientsWriteBlocked = TRUE;
+                break;
+            }
+        }
+    }
+}
+
+void
+OsCommNotifyWritable(OsCommPtr oc)
+{
+    if (!oc->writeBlocked)
+        return;
+    OsCommSetWriteBlocked(oc, FALSE);
+    OsCommSetOutputPending(oc, TRUE);
+    NewOutputPending = TRUE;
+}
+
+static Bool
+MemoryClientReady(OsCommPtr oc)
+{
+    if (oc->fd >= 0 || !oc->inputReady || oc->ignored)
+        return FALSE;
+    return !GrabInProgress || GrabInProgress == oc->clientIndex ||
+           oc->grabImpervious;
+}
+
+Bool
+OsCommHasReadyClients(void)
+{
+    int i;
+
+    for (i = 1; i < currentMaxClients; i++)
+        if (clients[i] && MemoryClientReady((OsCommPtr)clients[i]->osPrivate))
+            return TRUE;
+    return FALSE;
+}
+
+int
+OsCommAppendReadyClients(int *ready, int nready)
+{
+    int i;
+
+    for (i = 1; i < currentMaxClients; i++) {
+        if (clients[i] && MemoryClientReady((OsCommPtr)clients[i]->osPrivate))
+            ready[nready++] = i;
+    }
+    return nready;
 }
 
 /*****************
@@ -641,7 +737,8 @@ EstablishNewConnections(ClientPtr clientUnused, pointer closure)
 
 	_XSERVTransSetOption(new_trans_conn, TRANS_NONBLOCKING, 1);
 
-	if (!AllocNewConnection (new_trans_conn, newconn, connect_time))
+	if (!AllocNewConnection(NULL, NULL, new_trans_conn, newconn,
+                                connect_time))
 	{
 	    ErrorConnMax(new_trans_conn);
 	    _XSERVTransClose(new_trans_conn);
@@ -713,10 +810,12 @@ CloseDownFileDescriptor(OsCommPtr oc)
 {
     int connection = oc->fd;
 
-    if (oc->trans_conn) {
-	_XSERVTransDisconnect(oc->trans_conn);
-	_XSERVTransClose(oc->trans_conn);
-    }
+    OsCommSetInputReady(oc, FALSE);
+    OsCommSetOutputPending(oc, FALSE);
+    OsCommSetWriteBlocked(oc, FALSE);
+    TinyXTransportClose(oc);
+    if (connection < 0)
+        return;
     ConnectionTranslation[connection] = 0;
     FD_CLR(connection, &AllSockets);
     FD_CLR(connection, &AllClients);
@@ -817,7 +916,8 @@ CloseDownConnection(ClientPtr client)
     if (oc->output && oc->output->count)
 	FlushClient(client, oc, (char *)NULL, 0);
 #ifdef XDMCP
-    XdmcpCloseDisplay(oc->fd);
+    if (oc->fd >= 0)
+        XdmcpCloseDisplay(oc->fd);
 #endif
     CloseDownFileDescriptor(oc);
     FreeOsBuffers(oc);
@@ -879,7 +979,7 @@ OnlyListenToOneClient(ClientPtr client)
 	XFD_COPYSET(&ClientsWithInput, &SavedClientsWithInput);
 	XFD_ANDSET(&ClientsWithInput,
 		       &ClientsWithInput, &GrabImperviousClients);
-	if (FD_ISSET(connection, &SavedClientsWithInput))
+        if (connection >= 0 && FD_ISSET(connection, &SavedClientsWithInput))
 	{
 	    FD_CLR(connection, &SavedClientsWithInput);
 	    FD_SET(connection, &ClientsWithInput);
@@ -889,7 +989,8 @@ OnlyListenToOneClient(ClientPtr client)
 	XFD_COPYSET(&AllClients, &SavedAllClients);
 	XFD_UNSET(&AllSockets, &AllClients);
 	XFD_ANDSET(&AllClients, &AllClients, &GrabImperviousClients);
-	FD_SET(connection, &AllClients);
+        if (connection >= 0)
+            FD_SET(connection, &AllClients);
 	XFD_ORSET(&AllSockets, &AllSockets, &AllClients);
 	GrabInProgress = client->index;
     }
@@ -925,6 +1026,9 @@ IgnoreClient (ClientPtr client)
     int connection = oc->fd;
 
     isItTimeToYield = TRUE;
+    oc->ignored = TRUE;
+    if (connection < 0)
+        return;
     if (!GrabInProgress || FD_ISSET(connection, &AllClients))
     {
     	if (FD_ISSET (connection, &ClientsWithInput))
@@ -958,6 +1062,9 @@ AttendClient (ClientPtr client)
 {
     OsCommPtr oc = (OsCommPtr)client->osPrivate;
     int connection = oc->fd;
+    oc->ignored = FALSE;
+    if (connection < 0)
+        return;
     if (!GrabInProgress || GrabInProgress == client->index ||
 	FD_ISSET(connection, &GrabImperviousClients))
     {
@@ -984,7 +1091,9 @@ MakeClientGrabImpervious(ClientPtr client)
     OsCommPtr oc = (OsCommPtr)client->osPrivate;
     int connection = oc->fd;
 
-    FD_SET(connection, &GrabImperviousClients);
+    oc->grabImpervious = TRUE;
+    if (connection >= 0)
+        FD_SET(connection, &GrabImperviousClients);
 
     if (ServerGrabCallback)
     {
@@ -1003,8 +1112,11 @@ MakeClientGrabPervious(ClientPtr client)
     OsCommPtr oc = (OsCommPtr)client->osPrivate;
     int connection = oc->fd;
 
-    FD_CLR(connection, &GrabImperviousClients);
-    if (GrabInProgress && (GrabInProgress != client->index))
+    oc->grabImpervious = FALSE;
+    if (connection >= 0)
+        FD_CLR(connection, &GrabImperviousClients);
+    if (connection >= 0 && GrabInProgress &&
+        (GrabInProgress != client->index))
     {
 	if (FD_ISSET(connection, &ClientsWithInput))
 	{

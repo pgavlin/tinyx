@@ -152,6 +152,11 @@ WaitForSomethingInternal(int *pClientsReady, Bool block)
 	/* deal with any blocked jobs */
 	if (workQueue)
 	    ProcessWorkQueue();
+        if (OsCommHasReadyClients())
+        {
+            XFD_COPYSET(&ClientsWithInput, &clientsReadable);
+            break;
+        }
 	if (XFD_ANYSET (&ClientsWithInput))
 	{
 #ifdef SMART_SCHEDULE
@@ -312,11 +317,21 @@ WaitForSomethingInternal(int *pClientsReady, Bool block)
 #endif
 	    if (AnyClientsWriteBlocked && XFD_ANYSET (&clientsWritable))
 	    {
-		NewOutputPending = TRUE;
-		XFD_ORSET(&OutputPending, &clientsWritable, &OutputPending);
-		XFD_UNSET(&ClientsWriteBlocked, &clientsWritable);
-		if (! XFD_ANYSET(&ClientsWriteBlocked))
-		    AnyClientsWriteBlocked = FALSE;
+                int word;
+                for (word = 0; word < howmany(XFD_SETSIZE, NFDBITS); word++)
+                {
+                    fd_mask mask = clientsWritable.fds_bits[word];
+                    while (mask)
+                    {
+                        int bit = ffs(mask) - 1;
+                        int fd = bit + word * (sizeof(fd_mask) * 8);
+                        int clientIndex = ConnectionTranslation[fd];
+                        if (clientIndex && clients[clientIndex])
+                            OsCommNotifyWritable(
+                                (OsCommPtr)clients[clientIndex]->osPrivate);
+                        mask &= ~((fd_mask)1 << bit);
+                    }
+                }
 	    }
 
 	    XFD_ANDSET(&devicesReadable, &LastSelectMask, &EnabledDevices);
@@ -335,51 +350,45 @@ WaitForSomethingInternal(int *pClientsReady, Bool block)
     }
 
     nready = 0;
-    if (XFD_ANYSET (&clientsReadable))
+    if (XFD_ANYSET(&clientsReadable))
     {
-	for (i=0; i<howmany(XFD_SETSIZE, NFDBITS); i++)
-	{
-	    int highest_priority = 0;
+        for (i = 0; i < howmany(XFD_SETSIZE, NFDBITS); i++)
+        {
+            while (clientsReadable.fds_bits[i])
+            {
+                int client_index;
 
-	    while (clientsReadable.fds_bits[i])
-	    {
-	        int client_priority, client_index;
+                curclient = ffs(clientsReadable.fds_bits[i]) - 1;
+                client_index = ConnectionTranslation[
+                    curclient + (i * (sizeof(fd_mask) * 8))];
+                if (client_index)
+                    pClientsReady[nready++] = client_index;
+                clientsReadable.fds_bits[i] &=
+                    ~(((fd_mask)1L) << curclient);
+            }
+        }
+    }
+    nready = OsCommAppendReadyClients(pClientsReady, nready);
 
-		curclient = ffs (clientsReadable.fds_bits[i]) - 1;
-		client_index = /* raphael: modified */
-			ConnectionTranslation[curclient + (i * (sizeof(fd_mask) * 8))];
-		/*  We implement "strict" priorities.
-		 *  Only the highest priority client is returned to
-		 *  dix.  If multiple clients at the same priority are
-		 *  ready, they are all returned.  This means that an
-		 *  aggressive client could take over the server.
-		 *  This was not considered a big problem because
-		 *  aggressive clients can hose the server in so many
-		 *  other ways :)
-		 */
-		client_priority = clients[client_index]->priority;
-		if (nready == 0 || client_priority > highest_priority)
-		{
-		    /*  Either we found the first client, or we found
-		     *  a client whose priority is greater than all others
-		     *  that have been found so far.  Either way, we want
-		     *  to initialize the list of clients to contain just
-		     *  this client.
-		     */
-		    pClientsReady[0] = client_index;
-		    highest_priority = client_priority;
-		    nready = 1;
-		}
-		/*  the following if makes sure that multiple same-priority
-		 *  clients get batched together
-		 */
-		else if (client_priority == highest_priority)
-		{
-		    pClientsReady[nready++] = client_index;
-		}
-		clientsReadable.fds_bits[i] &= ~(((fd_mask)1L) << curclient);
-	    }
-	}
+    /* Preserve strict client priorities across native and memory clients. */
+    if (nready > 1)
+    {
+        int highest_priority = clients[pClientsReady[0]]->priority;
+        int output = 1;
+
+        for (i = 1; i < nready; i++)
+        {
+            int priority = clients[pClientsReady[i]]->priority;
+            if (priority > highest_priority)
+            {
+                highest_priority = priority;
+                pClientsReady[0] = pClientsReady[i];
+                output = 1;
+            }
+            else if (priority == highest_priority)
+                pClientsReady[output++] = pClientsReady[i];
+        }
+        nready = output;
     }
     return nready;
 }
@@ -399,7 +408,8 @@ PollForSomething(int *pClientsReady)
 Bool
 OsWorkPending(void)
 {
-    return workQueue || XFD_ANYSET(&ClientsWithInput) ||
+    return workQueue || NewOutputPending || XFD_ANYSET(&ClientsWithInput) ||
+           OsCommHasReadyClients() ||
            *checkForInput[0] != *checkForInput[1];
 }
 

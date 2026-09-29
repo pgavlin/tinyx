@@ -101,6 +101,7 @@ SOFTWARE.
 #endif
 
 #include <stddef.h>
+#include "transport.h"
 
 typedef Bool (*ValidatorFunc)(ARRAY8Ptr Auth, ARRAY8Ptr Data, int packet_type);
 typedef Bool (*GeneratorFunc)(ARRAY8Ptr Auth, ARRAY8Ptr Data, int packet_type);
@@ -155,13 +156,37 @@ typedef void (*OsCloseFunc)(ClientPtr);
 typedef int (*OsFlushFunc)(ClientPtr who, struct _osComm * oc, char* extraBuf, int extraCount);
 
 typedef struct _osComm {
-    int fd;
+    int fd;                     /* native descriptor, or -1 */
+    int clientIndex;
     ConnectionInputPtr input;
     ConnectionOutputPtr output;
     XID	auth_id;		/* authorization id */
     CARD32 conn_time;		/* timestamp if not established, else 0  */
-    struct _XtransConnInfo *trans_conn; /* transport connection object */
+    const TinyXTransportOps *transportOps;
+    void *transportData;
+    Bool transportClosed;
+    Bool inputReady;
+    Bool outputPending;
+    Bool writeBlocked;
+    Bool ignored;
+    Bool grabImpervious;
+    /* Native-only metadata used by authorization and access control. */
+    struct _XtransConnInfo *trans_conn;
 } OsCommRec, *OsCommPtr;
+
+ClientPtr AllocNewConnection(
+    const TinyXTransportOps * /*ops*/,
+    void * /*transportData*/,
+    struct _XtransConnInfo * /*trans_conn*/,
+    int /*fd*/,
+    CARD32 /*conn_time*/);
+
+void OsCommSetInputReady(OsCommPtr /*oc*/, Bool /*ready*/);
+void OsCommSetOutputPending(OsCommPtr /*oc*/, Bool /*pending*/);
+void OsCommSetWriteBlocked(OsCommPtr /*oc*/, Bool /*blocked*/);
+void OsCommNotifyWritable(OsCommPtr /*oc*/);
+Bool OsCommHasReadyClients(void);
+int OsCommAppendReadyClients(int * /*clientsReady*/, int /*nready*/);
 
 extern int FlushClient(
     ClientPtr /*who*/,

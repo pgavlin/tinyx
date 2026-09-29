@@ -12,7 +12,10 @@ libos_la_SOURCES = 	\
 	auth.c		\
 	connection.c	\
 	io.c		\
+	memory.c	\
 	mitauth.c	\
+	transport.c	\
+	transport.h	\
 	oscolor.c	\
 	osdep.h		\
 	osinit.c	\
