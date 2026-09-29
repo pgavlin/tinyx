@@ -21,6 +21,8 @@ libdix_la_SOURCES = 	\
 	glyphcurs.c	\
 	grabs.c		\
 	initatoms.c	\
+	lifecycle.c	\
+	lifecycle.h	\
 	main.c		\
 	pixmap.c	\
 	privates.c	\

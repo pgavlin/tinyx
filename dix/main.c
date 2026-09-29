@@ -84,45 +84,21 @@ Equipment Corporation.
 #include "misc.h"
 #include "os.h"
 #include "windowstr.h"
-#include "resource.h"
 #include "dixstruct.h"
 #include "gcstruct.h"
-#include "extension.h"
-#include "colormap.h"
-#include "colormapst.h"
-#include "cursorstr.h"
-#include <X11/fonts/font.h>
 #include "opaque.h"
 #include "servermd.h"
-#include "site.h"
-#include "dixfont.h"
-#include "extnsionst.h"
-#include "dixevents.h"          /* InitEvents() */
-
-#ifdef DPMSExtension
-#define DPMS_SERVER
-#include <X11/extensions/dpms.h>
-#include "dpmsproc.h"
-#endif
-
-extern int InitClientPrivates(ClientPtr client);
-
-extern void Dispatch(void);
+#include "lifecycle.h"
 
 char *ConnectionInfo;
 
 xConnSetupPrefix connSetupPrefix;
 
-extern FontPtr defaultFont;
-
 extern int screenPrivateCount;
 
-extern Bool CreateGCperDepthArray(void);
-
-static
 Bool CreateConnectionBlock(void);
 
-static void FreeScreen(ScreenPtr);
+void FreeScreen(ScreenPtr);
 
 _X_EXPORT PaddingInfo PixmapWidthPaddingInfo[33];
 
@@ -226,177 +202,15 @@ static int indexForScanlinePad[65] = {
 int
 main(int argc, char *argv[], char *envp[])
 {
-    int i;
+    TinyXServerInitialize(argc, argv, envp);
 
-    char *xauthfile;
+    do {
+        TinyXServerInitializeGeneration(argc, argv);
+        TinyXServerDispatchGeneration();
+    } while (!TinyXServerCloseGeneration());
 
-    HWEventQueueType alwaysCheckForInput[2];
-
-    display = "0";
-
-    /* Quartz support on Mac OS X requires that the Cocoa event loop be in
-     * the main thread. This allows the X server main to be called again
-     * from another thread. */
-
-    CheckUserParameters(argc, argv, envp);
-
-    CheckUserAuthorization();
-
-
-    InitConnectionLimits();
-
-    /* prep X authority file from environment; this can be overriden by a
-     * command line option */
-    xauthfile = getenv("XAUTHORITY");
-    if (xauthfile)
-        InitAuthorization(xauthfile);
-    ProcessCommandLine(argc, argv);
-
-    alwaysCheckForInput[0] = 0;
-    alwaysCheckForInput[1] = 1;
-    while (1) {
-        serverGeneration++;
-        ScreenSaverTime = defaultScreenSaverTime;
-        ScreenSaverInterval = defaultScreenSaverInterval;
-        ScreenSaverBlanking = defaultScreenSaverBlanking;
-        ScreenSaverAllowExposures = defaultScreenSaverAllowExposures;
-#ifdef DPMSExtension
-        DPMSStandbyTime = DEFAULT_SCREEN_SAVER_TIME;
-        DPMSSuspendTime = DEFAULT_SCREEN_SAVER_TIME;
-        DPMSOffTime = DEFAULT_SCREEN_SAVER_TIME;
-        DPMSEnabled = TRUE;
-        DPMSPowerLevel = 0;
-#endif
-        InitBlockAndWakeupHandlers();
-        /* Perform any operating system dependent initializations you'd like */
-        OsInit();
-        if (serverGeneration == 1) {
-            CreateWellKnownSockets();
-            for (i = 1; i < MAXCLIENTS; i++)
-                clients[i] = NullClient;
-            serverClient = malloc(sizeof(ClientRec));
-            if (!serverClient)
-                FatalError("couldn't create server client");
-            InitClient(serverClient, 0, (pointer) NULL);
-        }
-        else
-            ResetWellKnownSockets();
-        clients[0] = serverClient;
-        currentMaxClients = 1;
-
-        if (!InitClientResources(serverClient)) /* for root resources */
-            FatalError("couldn't init server resources");
-
-        SetInputCheck(&alwaysCheckForInput[0], &alwaysCheckForInput[1]);
-        screenInfo.numScreens = 0;
-
-        InitAtoms();
-        InitEvents();
-        InitGlyphCaching();
-        ResetExtensionPrivates();
-        ResetClientPrivates();
-        ResetScreenPrivates();
-        ResetWindowPrivates();
-        ResetGCPrivates();
-        ResetPixmapPrivates();
-        ResetColormapPrivates();
-        ResetFontPrivateIndex();
-        ResetDevicePrivateIndex();
-        InitCallbackManager();
-        InitVisualWrap();
-        InitOutput(&screenInfo, argc, argv);
-
-        if (screenInfo.numScreens < 1)
-            FatalError("no screens found");
-        InitExtensions(argc, argv);
-        if (!InitClientPrivates(serverClient))
-            FatalError("failed to allocate serverClient devprivates");
-        for (i = 0; i < screenInfo.numScreens; i++) {
-            ScreenPtr pScreen = screenInfo.screens[i];
-
-            if (!CreateScratchPixmapsForScreen(i))
-                FatalError("failed to create scratch pixmaps");
-            if (pScreen->CreateScreenResources &&
-                !(*pScreen->CreateScreenResources) (pScreen))
-                FatalError("failed to create screen resources");
-            if (!CreateGCperDepth(i))
-                FatalError("failed to create scratch GCs");
-            if (!CreateDefaultStipple(i))
-                FatalError("failed to create default stipple");
-            if (!CreateRootWindow(pScreen))
-                FatalError("failed to create root window");
-        }
-        InitInput(argc, argv);
-        if (InitAndStartDevices() != Success)
-            FatalError("failed to initialize core devices");
-
-        InitFonts();
-        if (SetDefaultFontPath(defaultFontPath) != Success)
-            ErrorF("failed to set default font path '%s'", defaultFontPath);
-        if (!SetDefaultFont(defaultTextFont))
-            FatalError("could not open default font '%s'", defaultTextFont);
-        if (!(rootCursor = CreateRootCursor(defaultCursorFont, 0)))
-            FatalError("could not open default cursor font '%s'",
-                       defaultCursorFont);
-#ifdef DPMSExtension
-        /* check all screens, looking for DPMS Capabilities */
-        DPMSCapableFlag = DPMSSupported();
-        if (!DPMSCapableFlag)
-            DPMSEnabled = FALSE;
-#endif
-
-
-        for (i = 0; i < screenInfo.numScreens; i++)
-            InitRootWindow(WindowTable[i]);
-        DefineInitialRootWindow(WindowTable[0]);
-        SaveScreens(SCREEN_SAVER_FORCER, ScreenSaverReset);
-
-        {
-            if (!CreateConnectionBlock())
-                FatalError("could not create connection block info");
-        }
-
-        Dispatch();
-
-        /* Now free up whatever must be freed */
-        if (screenIsSaved == SCREEN_SAVER_ON)
-            SaveScreens(SCREEN_SAVER_OFF, ScreenSaverReset);
-        FreeScreenSaverTimer();
-        CloseDownExtensions();
-
-        FreeAllResources();
-
-	memset(WindowTable, 0, sizeof(WindowTable));
-        CloseDownDevices();
-        for (i = screenInfo.numScreens - 1; i >= 0; i--) {
-            FreeScratchPixmapsForScreen(i);
-            FreeGCperDepth(i);
-            FreeDefaultStipple(i);
-            (*screenInfo.screens[i]->CloseScreen) (i, screenInfo.screens[i]);
-            FreeScreen(screenInfo.screens[i]);
-            screenInfo.numScreens = i;
-        }
-        CloseDownEvents();
-        FreeFonts();
-
-        free(serverClient->devPrivates);
-        serverClient->devPrivates = NULL;
-
-        if (dispatchException & DE_TERMINATE) {
-            CloseWellKnownConnections();
-        }
-
-        OsCleanup((dispatchException & DE_TERMINATE) != 0);
-
-        if (dispatchException & DE_TERMINATE) {
-            ddxGiveUp();
-            break;
-        }
-
-        free(ConnectionInfo);
-        ConnectionInfo = NULL;
-    }
-    return (0);
+    TinyXServerShutdown();
+    return 0;
 }
 
 static const int VendorRelease = VENDOR_RELEASE;
@@ -404,9 +218,8 @@ static const char * const VendorString = VENDOR_STRING;
 
 static const int padlength[4] = { 0, 3, 2, 1 };
 
-static
-    Bool
-CreateConnectionBlock()
+Bool
+CreateConnectionBlock(void)
 {
     xConnSetup setup;
     xWindowRoot root;
@@ -650,7 +463,7 @@ AddScreen(Bool (*pfnInit) (int /*index */ ,
     return i;
 }
 
-static void
+void
 FreeScreen(ScreenPtr pScreen)
 {
     free(pScreen->WindowPrivateSizes);
