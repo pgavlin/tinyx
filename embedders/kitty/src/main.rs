@@ -435,7 +435,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         options.socket.display()
     ));
 
-    let screen = ScreenGeometry::for_viewport(Viewport::current());
+    let mut screen = ScreenGeometry::for_viewport(Viewport::current());
     logger.write(format_args!(
         "configured {}x{} X screen for terminal pixel area",
         screen.width, screen.height
@@ -636,7 +636,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         server.pointer_button(button, false)?;
                     }
                 }
-                Event::Resize(_, _) => {
+                Event::Resize(columns, rows) => {
+                    let resized = ScreenGeometry::for_viewport(Viewport::new(columns, rows));
+                    if resized != screen {
+                        server.resize(resized.width, resized.height)?;
+                        screen = resized;
+                        logger.write(format_args!(
+                            "resized X screen to {}x{} for terminal pixel area",
+                            screen.width, screen.height
+                        ));
+                    }
                     frame_dirty = true;
                     logger.dirty = true;
                 }

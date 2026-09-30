@@ -872,8 +872,11 @@ The provisional `tinyx-display.h` interface exposes dimensions, stride, masks,
 and the pixel pointer without exposing `KdScreenInfo`. A Damage object attached
 to the screen pixmap accumulates changed regions. The host drains those regions
 at a step boundary; when caller storage is too small, they collapse to one
-bounding rectangle. No core code performs window-system presentation or pixel
-upload. The native fbdev and VESA backends remain separate and unchanged.
+bounding rectangle. The memory backend can atomically replace the dimensions,
+stride, and allocated or borrowed storage of its single screen. It updates the
+screen pixmap and root clipping, fully damages the replacement, and uses RandR
+to notify X11 clients. No core code performs window-system presentation or
+pixel upload. The native fbdev and VESA backends remain separate and unchanged.
 
 ### Host input injection
 
@@ -912,8 +915,11 @@ bytes to the server and may accept a bounded prefix, while
 `tinyx_client_receive()` drains server output. Both queues are finite.
 
 The framebuffer is exposed as read-only host data in native-endian depth-24,
-32-bpp words. Damage consumption, pointer and key injection, scheduling
-results, and callback lifetime are all represented without server internals.
+32-bpp words. API 1.1 can resize the single screen with the same screen
+configuration descriptor used at creation; success invalidates the previous
+framebuffer view and borrowed-storage lease and produces RandR notifications.
+Damage consumption, pointer and key injection, scheduling results, and callback
+lifetime are all represented without server internals.
 `kdrive/memory/embed-example.c` demonstrates startup and shutdown using only
 the public header, and `api-test.c` drives an X11 setup handshake through the
 facade.
@@ -927,7 +933,8 @@ hosts retain it.
 `embedders/kitty/` is a complete Rust host over this facade. It adapts a
 nonblocking Unix-domain socket to descriptor-free TinyX clients, consumes
 Damage before encoding the read-only framebuffer as PNG, and presents it with
-the Kitty graphics protocol. Terminal mouse events become absolute pointer and
+the Kitty graphics protocol. Terminal resize events resize the X screen to the
+new available pixel area. Terminal mouse events become absolute pointer and
 button injection. Enhanced keyboard events use explicit Xorg-compatible
 keycodes; modifier flags are converted into ordered synthetic key transitions
 when the terminal does not report physical modifier keys separately.

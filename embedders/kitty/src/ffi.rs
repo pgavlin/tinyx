@@ -126,6 +126,7 @@ unsafe extern "C" {
         request_budget: u32,
         result: *mut StepResult,
     ) -> c_int;
+    fn tinyx_server_resize(server: *mut TinyxServer, screen: *const ScreenConfig) -> c_int;
     fn tinyx_client_open(
         server: *mut TinyxServer,
         config: *const ClientConfig,
@@ -214,6 +215,26 @@ impl Server {
         }
         let raw = NonNull::new(raw).ok_or_else(|| "TinyX returned a null server".to_owned())?;
         Ok(Self { raw })
+    }
+
+    pub fn resize(&self, width: u32, height: u32) -> Result<(), String> {
+        let mut screen = ScreenConfig {
+            struct_size: 0,
+            width: 0,
+            height: 0,
+            stride_bytes: 0,
+            pixels: ptr::null_mut(),
+            pixels_size: 0,
+        };
+        unsafe {
+            tinyx_screen_config_init(&mut screen);
+            screen.width = width;
+            screen.height = height;
+            status(
+                "tinyx_server_resize",
+                tinyx_server_resize(self.raw.as_ptr(), &screen),
+            )
+        }
     }
 
     pub fn open_client(&self) -> Result<Client, String> {
@@ -430,6 +451,10 @@ mod tests {
     fn rust_ffi_starts_server_and_completes_x11_handshake() {
         let setup = [b'l', 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let server = Server::create(64, 64).unwrap();
+        server.resize(80, 48).unwrap();
+        let png = server.encode_png().unwrap();
+        assert_eq!(&png[16..20], &80_u32.to_be_bytes());
+        assert_eq!(&png[20..24], &48_u32.to_be_bytes());
         let mut client = server.open_client().unwrap();
         assert_eq!(client.send(&setup), Ok(setup.len()));
 

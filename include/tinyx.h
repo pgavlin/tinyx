@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 0
+#define TINYX_API_VERSION_MINOR 1
 #define TINYX_NO_TIMEOUT UINT32_MAX
 
 #define TINYX_MIN_KEYCODE 8
@@ -148,6 +148,15 @@ TINYX_API size_t tinyx_client_receive_pending(const tinyx_client *client);
 TINYX_API tinyx_status tinyx_client_shutdown_send(tinyx_client *client);
 TINYX_API int tinyx_client_is_closed(const tinyx_client *client);
 TINYX_API void tinyx_client_destroy(tinyx_client *client);
+
+/*
+ * Replace the active screen configuration. On success, the previous
+ * framebuffer pointer is invalid, old borrowed storage is no longer used,
+ * and the new framebuffer is fully damaged. A failure leaves the active
+ * screen unchanged.
+ */
+TINYX_API tinyx_status tinyx_server_resize(
+    tinyx_server *server, const tinyx_screen_config *screen);
 
 TINYX_API tinyx_status tinyx_server_get_framebuffer(
     tinyx_server *server, tinyx_framebuffer_info *info);

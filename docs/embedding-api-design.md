@@ -25,8 +25,8 @@ The first public API should provide:
 - a versioning strategy that permits compatible structure extension.
 
 The first version does not attempt to provide concurrent server instances,
-thread safety, native listeners, generation reset, runtime display changes, or
-a public font-provider interface.
+thread safety, native listeners, generation reset, or a public font-provider
+interface. API 1.1 adds runtime resizing of the single memory screen.
 
 ## Public header shape
 
@@ -48,7 +48,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 0
+#define TINYX_API_VERSION_MINOR 1
 
 typedef struct tinyx_server tinyx_server;
 typedef struct tinyx_client tinyx_client;
@@ -203,7 +203,9 @@ The v1 lifetime rules are:
 - creation binds the server to the calling thread;
 - all API operations must execute on that thread;
 - the API is non-thread-safe and non-reentrant;
-- configuration is immutable after successful creation;
+- host, client-queue, and pixel-format configuration is immutable after
+  successful creation; the single screen dimensions and storage may be
+  replaced with `tinyx_server_resize()`;
 - server destruction forcibly closes and invalidates all remaining client
   handles;
 - destruction is the only mutating operation permitted after poisoning;
@@ -389,21 +391,20 @@ layout explicit to portable hosts; WebAssembly's little-endian linear memory
 therefore receives the little-endian representation without requiring a
 special API format.
 
-The pixel pointer remains stable for the active screen configuration. In API
-v1, which has no resize operation, that means it remains stable until server
-destruction. Host-provided storage remains borrowed and is never freed by
-TinyX. Library-allocated storage is released during server destruction.
+The pixel pointer remains stable for the active screen configuration, until a
+successful `tinyx_server_resize()` or server destruction. Host-provided
+storage remains borrowed and is never freed by TinyX. Library-allocated
+storage is released when replaced or during server destruction.
 
 Framebuffer bytes are read-only from the host's perspective while TinyX owns
 or borrows them. The host may inspect them only while no TinyX API call is
 active and must not modify them. A host that supplies storage relinquishes
 write access for the active screen's lifetime.
 
-#### Future resize compatibility
+#### Runtime resize
 
-API v1 deliberately keeps the single screen fixed, but the initial screen is
-separated into `tinyx_screen_config` so a later minor API can add an operation
-with this shape without changing server creation:
+API 1.1 implements the operation anticipated by the original screen descriptor
+design:
 
 ```c
 tinyx_status tinyx_server_resize(
@@ -411,11 +412,18 @@ tinyx_status tinyx_server_resize(
     const tinyx_screen_config *screen);
 ```
 
-The expected contract is that a successful resize invalidates the previous
-framebuffer pointer, stops using old borrowed storage before returning,
-fully damages the new framebuffer, and notifies X11 clients through RandR. A
-failed resize leaves the existing screen and framebuffer unchanged. These are
-design constraints for the future operation, not API v1 behavior.
+The descriptor is copied during the call and follows the same validation and
+storage rules as `initial_screen`. A successful resize invalidates the previous
+framebuffer view, stops using old borrowed storage before returning, clears and
+fully damages the new framebuffer, resizes the root window, constrains the
+pointer to the new geometry, and notifies X11 clients through RandR and root
+`ConfigureNotify` events. The host must fetch framebuffer metadata again.
+A failed resize leaves the existing screen and framebuffer unchanged.
+
+Only the existing screen is resized: this does not create another screen or
+server generation, and the depth-24/32-bpp pixel format remains fixed. TinyX
+chooses physical dimensions that preserve the previous logical DPI. X11 RandR
+requests use the physical dimensions supplied by the client.
 
 ### Damage consumption
 

@@ -58,8 +58,19 @@ typedef struct {
     uint32_t height;
 } TinyXDamageRect;
 
+typedef enum {
+    TINYX_MEMORY_DISPLAY_RESIZE_OK = 0,
+    TINYX_MEMORY_DISPLAY_RESIZE_INVALID,
+    TINYX_MEMORY_DISPLAY_RESIZE_NO_MEMORY,
+    TINYX_MEMORY_DISPLAY_RESIZE_FAILED
+} TinyXMemoryDisplayResizeResult;
+
 /* Configure the singleton before generation initialization. */
 int TinyXMemoryDisplayConfigure(const TinyXMemoryDisplayConfig *config);
+
+/* Atomically replace the active framebuffer and notify the X11 screen. */
+TinyXMemoryDisplayResizeResult
+TinyXMemoryDisplayResize(const TinyXMemoryDisplayConfig *config);
 
 /* Returns nonzero while a memory framebuffer is active. */
 int TinyXMemoryDisplayGetFramebuffer(TinyXMemoryFramebufferInfo *info);

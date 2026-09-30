@@ -146,8 +146,8 @@ ValidateScreen(const tinyx_screen_config *screen)
     size_t stride;
 
     if (!screen || screen->struct_size < sizeof(*screen) ||
-        !screen->width || !screen->height || screen->width > INT_MAX ||
-        screen->height > INT_MAX ||
+        !screen->width || !screen->height || screen->width > 32767 ||
+        screen->height > 32767 ||
         (uint64_t)screen->width * 4 > (uint64_t)SIZE_MAX)
         return 0;
     stride = screen->stride_bytes ? screen->stride_bytes :
@@ -622,6 +622,53 @@ tinyx_client_destroy(tinyx_client *client)
     if (status != TINYX_OK)
         TinyXMemoryClientAbandon(client->transport);
     free(client);
+}
+
+typedef struct {
+    TinyXMemoryDisplayConfig config;
+    TinyXMemoryDisplayResizeResult result;
+} ResizeClosure;
+
+static void
+ResizeDisplay(void *data)
+{
+    ResizeClosure *closure = data;
+    closure->result = TinyXMemoryDisplayResize(&closure->config);
+}
+
+tinyx_status
+tinyx_server_resize(tinyx_server *server, const tinyx_screen_config *screen)
+{
+    ResizeClosure closure;
+    tinyx_status status;
+
+    if (!ValidateScreen(screen))
+        return TINYX_ERROR_INVALID_ARGUMENT;
+    status = BeginCall(server, 1);
+    if (status != TINYX_OK)
+        return status;
+
+    memset(&closure, 0, sizeof(closure));
+    closure.config.width = screen->width;
+    closure.config.height = screen->height;
+    closure.config.strideBytes = screen->stride_bytes;
+    closure.config.pixels = screen->pixels;
+    closure.config.pixelsSize = screen->pixels_size;
+    status = RunProtected(server, ResizeDisplay, &closure);
+    if (status != TINYX_OK)
+        return status;
+
+    switch (closure.result) {
+    case TINYX_MEMORY_DISPLAY_RESIZE_OK:
+        return TINYX_OK;
+    case TINYX_MEMORY_DISPLAY_RESIZE_INVALID:
+        return TINYX_ERROR_INVALID_ARGUMENT;
+    case TINYX_MEMORY_DISPLAY_RESIZE_NO_MEMORY:
+        return TINYX_ERROR_OUT_OF_MEMORY;
+    case TINYX_MEMORY_DISPLAY_RESIZE_FAILED:
+    default:
+        return TINYX_ERROR_INVALID_STATE;
+    }
 }
 
 tinyx_status

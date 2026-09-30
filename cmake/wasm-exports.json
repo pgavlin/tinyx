@@ -8,6 +8,7 @@
   "_tinyx_server_destroy",
   "_tinyx_server_last_error",
   "_tinyx_server_step",
+  "_tinyx_server_resize",
   "_tinyx_client_open",
   "_tinyx_client_send",
   "_tinyx_client_receive",

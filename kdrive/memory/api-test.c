@@ -12,6 +12,8 @@ main(void)
     tinyx_config config;
     tinyx_client_config clientConfig;
     tinyx_step_result step;
+    tinyx_framebuffer_info framebuffer;
+    tinyx_damage_rect damage;
     tinyx_error error;
     tinyx_server *server = NULL;
     tinyx_server *second = NULL;
@@ -71,16 +73,42 @@ main(void)
     if (iterations == 1000)
         return 9;
 
-    if (tinyx_client_shutdown_send(client) != TINYX_OK)
+    /* A successful resize replaces the framebuffer and fully damages it. */
+    while (tinyx_server_take_damage(server, &damage, 1, &count) == TINYX_OK &&
+           count != 0)
+        ;
+    screen.width = 96;
+    screen.height = 48;
+    if (tinyx_server_resize(server, &screen) != TINYX_OK)
         return 10;
+    if (tinyx_server_get_framebuffer(server, &framebuffer) != TINYX_OK ||
+        framebuffer.width != 96 || framebuffer.height != 48 ||
+        framebuffer.stride_bytes < 96 * 4)
+        return 11;
+    if (tinyx_server_take_damage(server, &damage, 1, &count) != TINYX_OK ||
+        count != 1 || damage.x != 0 || damage.y != 0 ||
+        damage.width != 96 || damage.height != 48)
+        return 12;
+
+    /* Invalid resize input must leave the active framebuffer unchanged. */
+    screen.width = 0;
+    if (tinyx_server_resize(server, &screen) != TINYX_ERROR_INVALID_ARGUMENT)
+        return 13;
+    if (tinyx_server_get_framebuffer(server, &framebuffer) != TINYX_OK ||
+        framebuffer.width != 96 || framebuffer.height != 48)
+        return 14;
+
+    if (tinyx_client_shutdown_send(client) != TINYX_OK)
+        return 15;
     tinyx_client_destroy(client);
     if (tinyx_server_destroy(server) != TINYX_OK)
-        return 11;
+        return 16;
 
+    screen.width = 64;
     tinyx_config_init(&config);
     config.initial_screen = &screen;
     if (tinyx_server_create(&config, &second, &error) !=
         TINYX_ERROR_ALREADY_EXISTS || second)
-        return 12;
+        return 17;
     return 0;
 }

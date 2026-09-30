@@ -18,6 +18,8 @@ typedef struct {
     Bool screenInitialized;
     DamagePtr damage;
     PixmapPtr screenPixmap;
+    ScreenPtr screen;
+    KdScreenInfo *screenInfo;
 } TinyXMemoryPriv;
 
 static TinyXMemoryDisplayConfig memoryConfig;
@@ -32,7 +34,7 @@ TinyXMemoryValidateConfig(const TinyXMemoryDisplayConfig *config,
 
     if (!config || !config->width || !config->height)
         return 0;
-    if (config->width > INT_MAX || config->height > INT_MAX ||
+    if (config->width > 32767 || config->height > 32767 ||
         config->width > (uint32_t)(SIZE_MAX / 4))
         return 0;
 
@@ -198,9 +200,171 @@ TinyXMemoryInitScreen(ScreenPtr pScreen)
 }
 
 static Bool
+TinyXMemoryRandRGetInfo(ScreenPtr pScreen, Rotation *rotations)
+{
+    (void)pScreen;
+    *rotations = RR_Rotate_0;
+    return TRUE;
+}
+
+static CARD32
+TinyXMemoryScaleMillimeters(int oldPixels, int oldMillimeters, int newPixels)
+{
+    uint64_t value;
+
+    if (oldPixels <= 0 || oldMillimeters <= 0)
+        return 1;
+    value = ((uint64_t)newPixels * (uint64_t)oldMillimeters +
+             (uint64_t)oldPixels / 2) / (uint64_t)oldPixels;
+    if (!value)
+        value = 1;
+    if (value > INT_MAX)
+        value = INT_MAX;
+    return (CARD32)value;
+}
+
+static TinyXMemoryDisplayResizeResult
+TinyXMemoryResize(const TinyXMemoryDisplayConfig *config,
+                  CARD32 mmWidth, CARD32 mmHeight)
+{
+    TinyXMemoryPriv *priv = activeMemory;
+    TinyXMemoryDisplayConfig replacement;
+    KdScreenInfo *screen;
+    ScreenPtr pScreen;
+    PixmapPtr pixmap;
+    CARD8 *pixels;
+    CARD8 *oldPixels;
+    size_t stride, size;
+    Bool ownsPixels;
+    Bool oldOwnsPixels;
+    Bool wasEnabled;
+    BoxRec box;
+    RegionRec region;
+    KdMouseMatrix matrix;
+
+    if (!priv || !priv->screen || !priv->screenInfo ||
+        !TinyXMemoryValidateConfig(config, &stride, &size))
+        return TINYX_MEMORY_DISPLAY_RESIZE_INVALID;
+
+    if (config->pixels) {
+        pixels = config->pixels;
+        ownsPixels = FALSE;
+        if (pixels == priv->pixels && priv->ownsPixels)
+            return TINYX_MEMORY_DISPLAY_RESIZE_INVALID;
+    }
+    else {
+        pixels = calloc(1, size);
+        if (!pixels)
+            return TINYX_MEMORY_DISPLAY_RESIZE_NO_MEMORY;
+        ownsPixels = TRUE;
+    }
+
+    replacement = *config;
+    replacement.strideBytes = stride;
+    screen = priv->screenInfo;
+    pScreen = priv->screen;
+    pixmap = priv->screenPixmap;
+    oldPixels = priv->pixels;
+    oldOwnsPixels = priv->ownsPixels;
+    wasEnabled = KdGetScreenPriv(pScreen)->enabled;
+
+    if (wasEnabled)
+        KdDisableScreen(pScreen);
+
+    if (!ownsPixels)
+        memset(pixels, 0, size);
+    DamageEmpty(priv->damage);
+
+    screen->width = replacement.width;
+    screen->height = replacement.height;
+    screen->width_mm = mmWidth;
+    screen->height_mm = mmHeight;
+    screen->fb.pixelStride = stride / 4;
+    screen->fb.byteStride = stride;
+    screen->fb.frameBuffer = pixels;
+    screen->memory_base = pixels;
+    screen->memory_size = size;
+    screen->off_screen_base = size;
+
+    pScreen->width = replacement.width;
+    pScreen->height = replacement.height;
+    pScreen->mmWidth = mmWidth;
+    pScreen->mmHeight = mmHeight;
+    /* The memory screen always uses miModifyPixmapHeader with a valid pixmap. */
+    (void)(*pScreen->ModifyPixmapHeader)(
+        pixmap, replacement.width, replacement.height,
+        TINYX_MEMORY_DISPLAY_DEPTH, TINYX_MEMORY_DISPLAY_BITS_PER_PIXEL,
+        stride, pixels);
+
+    priv->pixels = pixels;
+    priv->size = size;
+    priv->ownsPixels = ownsPixels;
+    memoryConfig = replacement;
+
+    KdComputeMouseMatrix(&matrix, RR_Rotate_0,
+                         replacement.width, replacement.height);
+    KdSetMouseMatrix(&matrix);
+    if (wasEnabled)
+        (void)KdEnableScreen(pScreen);
+
+    RRScreenSizeNotify(pScreen);
+    box.x1 = 0;
+    box.y1 = 0;
+    box.x2 = replacement.width;
+    box.y2 = replacement.height;
+    REGION_INIT(&region, &box, 1);
+    DamageDamageRegion(&pixmap->drawable, &region);
+    REGION_UNINIT(&region);
+
+    if (oldOwnsPixels && oldPixels != pixels)
+        free(oldPixels);
+    return TINYX_MEMORY_DISPLAY_RESIZE_OK;
+}
+
+TinyXMemoryDisplayResizeResult
+TinyXMemoryDisplayResize(const TinyXMemoryDisplayConfig *config)
+{
+    CARD32 mmWidth, mmHeight;
+
+    if (!activeMemory || !activeMemory->screen)
+        return TINYX_MEMORY_DISPLAY_RESIZE_INVALID;
+    mmWidth = TinyXMemoryScaleMillimeters(activeMemory->screen->width,
+                                          activeMemory->screen->mmWidth,
+                                          config ? config->width : 0);
+    mmHeight = TinyXMemoryScaleMillimeters(activeMemory->screen->height,
+                                           activeMemory->screen->mmHeight,
+                                           config ? config->height : 0);
+    return TinyXMemoryResize(config, mmWidth, mmHeight);
+}
+
+static Bool
+TinyXMemoryRandRSetSize(ScreenPtr pScreen, CARD16 width, CARD16 height,
+                        CARD32 mmWidth, CARD32 mmHeight)
+{
+    TinyXMemoryDisplayConfig config;
+
+    (void)pScreen;
+    memset(&config, 0, sizeof(config));
+    config.width = width;
+    config.height = height;
+    return TinyXMemoryResize(&config, mmWidth, mmHeight) ==
+        TINYX_MEMORY_DISPLAY_RESIZE_OK;
+}
+
+static Bool
 TinyXMemoryFinishInitScreen(ScreenPtr pScreen)
 {
-    return RRScreenInit(pScreen);
+    rrScrPrivPtr pScrPriv;
+
+    if (!RRScreenInit(pScreen))
+        return FALSE;
+    pScrPriv = rrGetScrPriv(pScreen);
+    pScrPriv->rrGetInfo = TinyXMemoryRandRGetInfo;
+#if RANDR_12_INTERFACE
+    pScrPriv->rrScreenSetSize = TinyXMemoryRandRSetSize;
+    RRScreenSetSizeRange(pScreen, 1, 1, 32767, 32767);
+#endif
+    return TRUE;
 }
 
 static void
@@ -211,6 +375,8 @@ TinyXMemoryDamageDestroyed(DamagePtr damage, void *closure)
     (void)damage;
     priv->damage = NULL;
     priv->screenPixmap = NULL;
+    priv->screen = NULL;
+    priv->screenInfo = NULL;
 }
 
 static Bool
@@ -222,6 +388,8 @@ TinyXMemoryCreateResources(ScreenPtr pScreen)
     if (!DamageSetup(pScreen))
         return FALSE;
 
+    priv->screen = pScreen;
+    priv->screenInfo = pScreenPriv->screen;
     priv->screenPixmap = fbGetScreenPixmap(pScreen);
     priv->damage = DamageCreate(NULL, TinyXMemoryDamageDestroyed,
                                 DamageReportNone, TRUE, pScreen, priv);

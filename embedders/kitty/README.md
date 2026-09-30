@@ -34,9 +34,8 @@ Options and corresponding environment variables are:
 ```
 
 Press Control-C to exit. The X screen is sized to the terminal pixel area
-available above the log when the host starts. API v1 does not support live
-screen resizing, so later terminal resizes preserve and fit that initial screen
-rather than changing its X11 geometry.
+available above the log and is resized when that area changes. TinyX replaces
+its framebuffer and notifies connected X11 clients through RandR.
 
 Enhanced terminal keyboard events are translated to the fixed US Xorg keymap
 documented by `tinyx.h`. Explicit modifier-key events are preserved; when a
