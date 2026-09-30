@@ -31,11 +31,21 @@ Options and corresponding environment variables are:
 --display NUMBER   TINYX_DISPLAY
 --socket PATH      TINYX_X11_SOCKET
 --log PATH         TINYX_KITTY_LOG
+--dpi NUMBER       TINYX_DPI
 ```
 
 Press Control-C to exit. The X screen is sized to the terminal pixel area
 available above the log and is resized when that area changes. TinyX replaces
 its framebuffer and notifies connected X11 clients through RandR.
+
+Before taking over terminal input, the host queries Kitty's `dpi_x` and `dpi_y`
+capabilities and reports corresponding physical screen dimensions to X11. This
+allows point-sized Xft fonts to follow the active Kitty window's logical DPI.
+If the query is unavailable, the host falls back to 75 DPI. `--dpi` overrides
+automatic detection on both axes; it is useful with other compatible terminals
+or when a different UI scale is desired. Applications that request an explicit
+pixel-sized font, including stock st's default `pixelsize=12`, do not scale in
+response to DPI.
 
 Enhanced terminal keyboard events are translated to the fixed US Xorg keymap
 documented by `tinyx.h`. Explicit modifier-key events are preserved; when a

@@ -72,6 +72,8 @@ main(void)
     tinyx_screen_config_init(&screen);
     screen.width = 64;
     screen.height = 64;
+    screen.width_mm = 22;
+    screen.height_mm = 17;
     tinyx_config_init(&config);
     config.initial_screen = &screen;
     if (tinyx_server_create(&config, &server, &error) != TINYX_OK)
@@ -93,9 +95,12 @@ main(void)
 
     resource_base = be32(reply + 12);
     screen_offset = 40 + ((be16(reply + 24) + 3) & ~(size_t) 3) + reply[29] * 8;
-    if (screen_offset + 4 > setup_size)
+    if (screen_offset + 28 > setup_size)
         goto done;
     root = be32(reply + screen_offset);
+    if (be16(reply + screen_offset + 24) != 22 ||
+        be16(reply + screen_offset + 26) != 17)
+        goto done;
 
     put_be16(create_gc + 2, 4);
     put_be32(create_gc + 4, resource_base);

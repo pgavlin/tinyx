@@ -147,7 +147,8 @@ ValidateScreen(const tinyx_screen_config *screen)
 
     if (!screen || screen->struct_size < sizeof(*screen) ||
         !screen->width || !screen->height || screen->width > 32767 ||
-        screen->height > 32767 ||
+        screen->height > 32767 || screen->width_mm > 32767 ||
+        screen->height_mm > 32767 ||
         (uint64_t)screen->width * 4 > (uint64_t)SIZE_MAX)
         return 0;
     stride = screen->stride_bytes ? screen->stride_bytes :
@@ -261,6 +262,8 @@ tinyx_server_create(const tinyx_config *config, tinyx_server **outServer,
     memset(&display, 0, sizeof(display));
     display.width = config->initial_screen->width;
     display.height = config->initial_screen->height;
+    display.widthMM = config->initial_screen->width_mm;
+    display.heightMM = config->initial_screen->height_mm;
     display.strideBytes = config->initial_screen->stride_bytes;
     display.pixels = config->initial_screen->pixels;
     display.pixelsSize = config->initial_screen->pixels_size;
@@ -651,6 +654,8 @@ tinyx_server_resize(tinyx_server *server, const tinyx_screen_config *screen)
     memset(&closure, 0, sizeof(closure));
     closure.config.width = screen->width;
     closure.config.height = screen->height;
+    closure.config.widthMM = screen->width_mm;
+    closure.config.heightMM = screen->height_mm;
     closure.config.strideBytes = screen->stride_bytes;
     closure.config.pixels = screen->pixels;
     closure.config.pixelsSize = screen->pixels_size;

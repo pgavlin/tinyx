@@ -28,6 +28,9 @@ extern "C" {
 typedef struct {
     uint32_t width;
     uint32_t height;
+    /* Zero selects 75 DPI initially and preserves DPI during resize. */
+    uint32_t widthMM;
+    uint32_t heightMM;
     /* Zero selects width * 4. Must otherwise be at least width * 4. */
     size_t strideBytes;
     /*

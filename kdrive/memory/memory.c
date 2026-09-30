@@ -35,6 +35,7 @@ TinyXMemoryValidateConfig(const TinyXMemoryDisplayConfig *config,
     if (!config || !config->width || !config->height)
         return 0;
     if (config->width > 32767 || config->height > 32767 ||
+        config->widthMM > 32767 || config->heightMM > 32767 ||
         config->width > (uint32_t)(SIZE_MAX / 4))
         return 0;
 
@@ -175,6 +176,8 @@ TinyXMemoryScreenInit(KdScreenInfo *screen)
 
     screen->width = memoryConfig.width;
     screen->height = memoryConfig.height;
+    screen->width_mm = memoryConfig.widthMM;
+    screen->height_mm = memoryConfig.heightMM;
     screen->fb.depth = TINYX_MEMORY_DISPLAY_DEPTH;
     screen->fb.bitsPerPixel = TINYX_MEMORY_DISPLAY_BITS_PER_PIXEL;
     screen->fb.pixelStride = memoryConfig.strideBytes / 4;
@@ -260,6 +263,8 @@ TinyXMemoryResize(const TinyXMemoryDisplayConfig *config,
     }
 
     replacement = *config;
+    replacement.widthMM = mmWidth;
+    replacement.heightMM = mmHeight;
     replacement.strideBytes = stride;
     screen = priv->screenInfo;
     pScreen = priv->screen;
@@ -328,12 +333,14 @@ TinyXMemoryDisplayResize(const TinyXMemoryDisplayConfig *config)
 
     if (!activeMemory || !activeMemory->screen)
         return TINYX_MEMORY_DISPLAY_RESIZE_INVALID;
-    mmWidth = TinyXMemoryScaleMillimeters(activeMemory->screen->width,
-                                          activeMemory->screen->mmWidth,
-                                          config ? config->width : 0);
-    mmHeight = TinyXMemoryScaleMillimeters(activeMemory->screen->height,
-                                           activeMemory->screen->mmHeight,
-                                           config ? config->height : 0);
+    mmWidth = config && config->widthMM ? config->widthMM :
+        TinyXMemoryScaleMillimeters(activeMemory->screen->width,
+                                    activeMemory->screen->mmWidth,
+                                    config ? config->width : 0);
+    mmHeight = config && config->heightMM ? config->heightMM :
+        TinyXMemoryScaleMillimeters(activeMemory->screen->height,
+                                    activeMemory->screen->mmHeight,
+                                    config ? config->height : 0);
     return TinyXMemoryResize(config, mmWidth, mmHeight);
 }
 

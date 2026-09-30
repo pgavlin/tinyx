@@ -26,7 +26,8 @@ The first public API should provide:
 
 The first version does not attempt to provide concurrent server instances,
 thread safety, native listeners, generation reset, or a public font-provider
-interface. API 1.1 adds runtime resizing of the single memory screen.
+interface. API 1.1 adds runtime resizing of the single memory screen, and API
+1.2 adds host-supplied physical screen dimensions for DPI-aware clients.
 
 ## Public header shape
 
@@ -48,7 +49,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 1
+#define TINYX_API_VERSION_MINOR 2
 
 typedef struct tinyx_server tinyx_server;
 typedef struct tinyx_client tinyx_client;
@@ -140,6 +141,10 @@ typedef struct tinyx_screen_config {
      */
     void *pixels;
     size_t pixels_size;
+
+    /* Optional physical dimensions; zero selects/preserves default DPI. */
+    uint32_t width_mm;
+    uint32_t height_mm;
 } tinyx_screen_config;
 
 void tinyx_screen_config_init(tinyx_screen_config *config);
@@ -178,8 +183,12 @@ server. It must still be called from the server thread and outside a callback.
 
 `tinyx_screen_config_init()` zeroes the screen descriptor, records its size,
 and installs the default dimensions and allocation policy. The host may then
-override the dimensions, stride, or storage. `tinyx_config_init()` similarly
-records the API version and installs server defaults. The host assigns a
+override the dimensions, physical dimensions, stride, or storage. Zero
+physical dimensions select the historical 75 DPI at creation. Supplying one
+or both millimeter dimensions controls the corresponding X11 screen DPI;
+values must fit the protocol's 16-bit physical-size fields.
+`tinyx_config_init()` similarly records the API version and installs server
+defaults. The host assigns a
 pointer to its screen descriptor to `initial_screen` before creation.
 
 The screen descriptor is copied during `tinyx_server_create()`, so the
@@ -421,9 +430,11 @@ pointer to the new geometry, and notifies X11 clients through RandR and root
 A failed resize leaves the existing screen and framebuffer unchanged.
 
 Only the existing screen is resized: this does not create another screen or
-server generation, and the depth-24/32-bpp pixel format remains fixed. TinyX
-chooses physical dimensions that preserve the previous logical DPI. X11 RandR
-requests use the physical dimensions supplied by the client.
+server generation, and the depth-24/32-bpp pixel format remains fixed. API 1.2
+allows the host to supply `width_mm` and `height_mm`. A zero axis preserves its
+previous logical DPI across the resize; a nonzero axis replaces that physical
+dimension and therefore its DPI. X11 RandR requests use the physical dimensions
+supplied by the client.
 
 ### Damage consumption
 
@@ -561,9 +572,12 @@ implementations inspect only fields present in the reported size. The server
 configuration refers to its initial screen by pointer so the two structures
 can evolve independently.
 
-A minor API version may append structure fields or add functions. Removing a
-field, changing an existing field's meaning, or changing an existing function
-signature requires a major API version.
+The API remains prerelease. API 1.2 enlarged `tinyx_screen_config`, so callers
+must rebuild against the matching header and library. `struct_size` still
+allows validation and leaves room for a stable compatible-extension policy
+once the ABI is released. After that point, removing a field, changing an
+existing field's meaning, or changing an existing function signature will
+require a major API version.
 
 Only deliberate `tinyx_*` public facade symbols should be exported. The
 following remain private:

@@ -20,7 +20,11 @@ resizing all worked. The bring-up exposed and fixed a CMake configuration bug
 that compiled KDrive without `kdrive-config.h` on 64-bit hosts, giving KDrive
 and DIX incompatible `KeySym` widths and corrupting `GetKeyboardMapping`.
 Native and swapped protocol tests now cover keyboard-map reads and changes.
-Running st under dwm and manual terminal-to-Kitty input remain to be validated.
+Stock dwm 6.8 also starts successfully, renders its Xft bar, installs its EWMH
+root properties, and rejects a second window manager. The Kitty host now
+reports its detected logical DPI, producing a correctly scaled dwm bar on
+HiDPI displays. Running st under dwm and manual terminal-to-Kitty input remain
+to be validated.
 
 Compiling dwm, Xlib, and application processes into WebAssembly is a separate
 project. It would require a client-side Xlib transport and replacements for

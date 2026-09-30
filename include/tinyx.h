@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 1
+#define TINYX_API_VERSION_MINOR 2
 #define TINYX_NO_TIMEOUT UINT32_MAX
 
 #define TINYX_MIN_KEYCODE 8
@@ -71,6 +71,12 @@ typedef struct tinyx_screen_config {
     size_t stride_bytes;
     void *pixels;
     size_t pixels_size;
+    /*
+     * Optional physical screen dimensions. Zero selects the default 75 DPI
+     * during creation and preserves the current DPI during resize.
+     */
+    uint32_t width_mm;
+    uint32_t height_mm;
 } tinyx_screen_config;
 
 typedef struct tinyx_config {

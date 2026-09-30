@@ -70,9 +70,10 @@ cargo run --manifest-path embedders/kitty/Cargo.toml --release
 DISPLAY=:99 xclock
 ```
 
-The default display is `:99`. See `embedders/kitty/README.md` for socket, log,
-and dependency configuration. This development host trusts clients admitted
-through its local socket. The native application and window-manager bring-up
+The default display is `:99`. The host queries Kitty for its logical DPI and
+supports an explicit `--dpi` override. See `embedders/kitty/README.md` for
+socket, log, DPI, and dependency configuration. This development host trusts
+clients admitted through its local socket. The native application and window-manager bring-up
 plan is documented in [Running st and dwm on TinyX](dwm-integration-plan.md).
 
 ## Emscripten build

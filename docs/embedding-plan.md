@@ -40,7 +40,8 @@ protocol semantics and server state.
 - **Phase 5 complete:** a KDrive memory backend renders a depth-24, 32-bpp
   screen into allocated or host-provided linear memory and exposes accumulated
   Damage regions without performing presentation. API 1.1 can atomically
-  replace its dimensions and storage and notifies clients through RandR.
+  replace its dimensions and storage and notifies clients through RandR; API
+  1.2 accepts physical dimensions for host-controlled DPI.
 - **Phase 6 complete:** hosts can inject absolute or relative pointer motion,
   button transitions, and X keycode transitions without descriptors; events
   retain the ordinary KDrive, MI, and DIX path and wake cooperative hosts.

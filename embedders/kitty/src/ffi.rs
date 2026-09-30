@@ -34,6 +34,8 @@ struct ScreenConfig {
     stride_bytes: usize,
     pixels: *mut c_void,
     pixels_size: usize,
+    width_mm: u32,
+    height_mm: u32,
 }
 
 #[repr(C)]
@@ -173,7 +175,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn create(width: u32, height: u32) -> Result<Self, String> {
+    pub fn create(width: u32, height: u32, width_mm: u32, height_mm: u32) -> Result<Self, String> {
         let mut screen = ScreenConfig {
             struct_size: 0,
             width: 0,
@@ -181,6 +183,8 @@ impl Server {
             stride_bytes: 0,
             pixels: ptr::null_mut(),
             pixels_size: 0,
+            width_mm: 0,
+            height_mm: 0,
         };
         let mut config = Config {
             struct_size: 0,
@@ -199,6 +203,8 @@ impl Server {
             tinyx_screen_config_init(&mut screen);
             screen.width = width;
             screen.height = height;
+            screen.width_mm = width_mm;
+            screen.height_mm = height_mm;
             tinyx_config_init(&mut config);
             config.initial_screen = &screen;
             let result = tinyx_server_create(&config, &mut raw, &mut error);
@@ -225,6 +231,8 @@ impl Server {
             stride_bytes: 0,
             pixels: ptr::null_mut(),
             pixels_size: 0,
+            width_mm: 0,
+            height_mm: 0,
         };
         unsafe {
             tinyx_screen_config_init(&mut screen);
@@ -450,7 +458,7 @@ mod tests {
     #[test]
     fn rust_ffi_starts_server_and_completes_x11_handshake() {
         let setup = [b'l', 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let server = Server::create(64, 64).unwrap();
+        let server = Server::create(64, 64, 22, 22).unwrap();
         server.resize(80, 48).unwrap();
         let png = server.encode_png().unwrap();
         assert_eq!(&png[16..20], &80_u32.to_be_bytes());

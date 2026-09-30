@@ -918,6 +918,9 @@ The framebuffer is exposed as read-only host data in native-endian depth-24,
 32-bpp words. API 1.1 can resize the single screen with the same screen
 configuration descriptor used at creation; success invalidates the previous
 framebuffer view and borrowed-storage lease and produces RandR notifications.
+API 1.2 lets the host provide physical millimeter dimensions so X11 and Xft
+clients derive the intended DPI; zero dimensions retain the historical 75-DPI
+default at creation and preserve DPI across resize.
 Damage consumption, pointer and key injection, scheduling results, and callback
 lifetime are all represented without server internals.
 `kdrive/memory/embed-example.c` demonstrates startup and shutdown using only
@@ -933,9 +936,13 @@ hosts retain it.
 `embedders/kitty/` is a complete Rust host over this facade. It adapts a
 nonblocking Unix-domain socket to descriptor-free TinyX clients, consumes
 Damage before encoding the read-only framebuffer as PNG, and presents it with
-the Kitty graphics protocol. Terminal resize events resize the X screen to the
-new available pixel area. Terminal mouse events become absolute pointer and
-button injection. Enhanced keyboard events use explicit Xorg-compatible
+the Kitty graphics protocol. Before starting concurrent terminal input, it
+uses Kitty's terminal query protocol to obtain the active window's logical DPI
+and converts that to X11 physical dimensions; an explicit override and a
+75-DPI fallback cover unavailable queries. Terminal resize events resize the X
+screen to the new available pixel area while preserving that DPI. Terminal
+mouse events become absolute pointer motion and button injection. Enhanced
+keyboard events use explicit Xorg-compatible
 keycodes; modifier flags are converted into ordered synthetic key transitions
 when the terminal does not report physical modifier keys separately. The
 planned stock-st and stock-dwm validation of this host, Xft/Render, selections,

@@ -82,6 +82,62 @@ impl ScreenGeometry {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ScreenDpi {
+    x: f64,
+    y: f64,
+}
+
+impl ScreenDpi {
+    const DEFAULT: Self = Self { x: 75.0, y: 75.0 };
+
+    fn uniform(value: f64) -> Self {
+        Self { x: value, y: value }
+    }
+
+    fn physical_size(self, screen: ScreenGeometry) -> (u32, u32) {
+        (
+            millimeters(screen.width, self.x),
+            millimeters(screen.height, self.y),
+        )
+    }
+}
+
+fn millimeters(pixels: u32, dpi: f64) -> u32 {
+    (f64::from(pixels) * 25.4 / dpi).round().clamp(1.0, 32767.0) as u32
+}
+
+fn valid_dpi(value: f64) -> bool {
+    value.is_finite() && (1.0..=1000.0).contains(&value)
+}
+
+fn parse_terminal_dpi(output: &str) -> Option<ScreenDpi> {
+    let mut x = None;
+    let mut y = None;
+    for line in output.lines() {
+        let (name, value) = line.split_once(':')?;
+        let value = value.trim().parse::<f64>().ok()?;
+        match name.trim() {
+            "dpi_x" if valid_dpi(value) => x = Some(value),
+            "dpi_y" if valid_dpi(value) => y = Some(value),
+            _ => {}
+        }
+    }
+    Some(ScreenDpi { x: x?, y: y? })
+}
+
+fn detect_terminal_dpi() -> Option<ScreenDpi> {
+    std::env::var_os("KITTY_WINDOW_ID")?;
+    let output = std::process::Command::new("kitten")
+        .args(["query_terminal", "--wait-for", "1", "dpi_x", "dpi_y"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_terminal_dpi(std::str::from_utf8(&output.stdout).ok()?)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ImagePlacement {
     column: u16,
@@ -196,12 +252,13 @@ impl Drop for TerminalGuard {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Options {
     display: u16,
     socket: PathBuf,
     lock: PathBuf,
     log: PathBuf,
+    dpi: Option<f64>,
 }
 
 impl Options {
@@ -209,11 +266,13 @@ impl Options {
         let display_environment = std::env::var("TINYX_DISPLAY").ok();
         let socket_environment = std::env::var_os("TINYX_X11_SOCKET").map(PathBuf::from);
         let log_environment = std::env::var_os("TINYX_KITTY_LOG").map(PathBuf::from);
+        let dpi_environment = std::env::var("TINYX_DPI").ok();
         Self::parse(
             std::env::args().skip(1),
             display_environment.as_deref(),
             socket_environment,
             log_environment,
+            dpi_environment.as_deref(),
         )
     }
 
@@ -222,6 +281,7 @@ impl Options {
         display_environment: Option<&str>,
         socket_environment: Option<PathBuf>,
         log_environment: Option<PathBuf>,
+        dpi_environment: Option<&str>,
     ) -> io::Result<Self> {
         let mut display = display_environment
             .map(str::parse)
@@ -230,6 +290,13 @@ impl Options {
             .unwrap_or(99);
         let mut socket = socket_environment;
         let mut log = log_environment;
+        let mut dpi = dpi_environment
+            .map(str::parse::<f64>)
+            .transpose()
+            .map_err(|_| invalid_input("TINYX_DPI must be a number"))?;
+        if dpi.is_some_and(|value| !valid_dpi(value)) {
+            return Err(invalid_input("TINYX_DPI must be between 1 and 1000"));
+        }
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             match argument.as_str() {
@@ -254,6 +321,18 @@ impl Options {
                             .ok_or_else(|| invalid_input("--log requires a path"))?,
                     ));
                 }
+                "--dpi" => {
+                    dpi = Some(
+                        arguments
+                            .next()
+                            .ok_or_else(|| invalid_input("--dpi requires a number"))?
+                            .parse()
+                            .map_err(|_| invalid_input("--dpi requires a number"))?,
+                    );
+                    if dpi.is_some_and(|value| !valid_dpi(value)) {
+                        return Err(invalid_input("--dpi must be between 1 and 1000"));
+                    }
+                }
                 _ => return Err(invalid_input(format!("unknown argument: {argument}"))),
             }
         }
@@ -274,6 +353,7 @@ impl Options {
             socket,
             lock,
             log,
+            dpi,
         })
     }
 }
@@ -436,11 +516,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let mut screen = ScreenGeometry::for_viewport(Viewport::current());
+    let dpi = options
+        .dpi
+        .map(ScreenDpi::uniform)
+        .or_else(detect_terminal_dpi)
+        .unwrap_or(ScreenDpi::DEFAULT);
+    let (width_mm, height_mm) = dpi.physical_size(screen);
     logger.write(format_args!(
-        "configured {}x{} X screen for terminal pixel area",
-        screen.width, screen.height
+        "configured {}x{} X screen at {:.1}x{:.1} DPI ({}x{} mm)",
+        screen.width, screen.height, dpi.x, dpi.y, width_mm, height_mm
     ));
-    let server = Server::create(screen.width, screen.height)?;
+    let server = Server::create(screen.width, screen.height, width_mm, height_mm)?;
     let terminal = TerminalGuard::enter()?;
     let terminal_events = terminal_event_reader();
     let mut stdout = io::stdout();
@@ -816,6 +902,7 @@ mod tests {
             Some("7"),
             Some(PathBuf::from("/run/user/1000/tinyx.sock")),
             Some(PathBuf::from("/tmp/env.log")),
+            Some("144"),
         )
         .unwrap();
         assert_eq!(environment.display, 7);
@@ -825,13 +912,27 @@ mod tests {
             Path::new("/run/user/1000/tinyx.sock.lock")
         );
         assert_eq!(environment.log, Path::new("/tmp/env.log"));
+        assert_eq!(environment.dpi, Some(144.0));
     }
 
     #[test]
     fn default_socket_path_follows_display_number() {
-        let options = Options::parse(Vec::<String>::new(), Some("42"), None, None).unwrap();
+        let options = Options::parse(Vec::<String>::new(), Some("42"), None, None, None).unwrap();
         assert_eq!(options.socket, Path::new("/tmp/.X11-unix/X42"));
         assert_eq!(options.lock, Path::new("/tmp/.X42-lock"));
+    }
+
+    #[test]
+    fn terminal_dpi_is_parsed_and_converted_to_millimeters() {
+        let dpi = parse_terminal_dpi("dpi_x: 144\ndpi_y: 144\n").unwrap();
+        assert_eq!(dpi, ScreenDpi::uniform(144.0));
+        assert_eq!(
+            dpi.physical_size(ScreenGeometry {
+                width: 1920,
+                height: 1080,
+            }),
+            (339, 191)
+        );
     }
 
     #[test]
