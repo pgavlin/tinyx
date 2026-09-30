@@ -393,11 +393,20 @@ embeddedGetGlyphs(FontPtr font, unsigned long count, unsigned char *chars,
 {
     TinyXFontInstance *instance = font->fontPrivate;
     const TinyXDecodedFont *source = instance->lease.font;
+    unsigned int defaultRow = source->defaultCh >> 8;
+    unsigned int defaultCol = source->defaultCh & 0xff;
     int defaultIndex = -1;
 
-    if (source->defaultCh >= source->firstCol &&
-        source->defaultCh <= source->lastCol)
-        defaultIndex = source->encoding[source->defaultCh - source->firstCol];
+    if (defaultRow >= source->firstRow && defaultRow <= source->lastRow &&
+        defaultCol >= source->firstCol && defaultCol <= source->lastCol) {
+        size_t defaultOffset =
+            (defaultRow - source->firstRow) *
+            (source->lastCol - source->firstCol + 1) +
+            (defaultCol - source->firstCol);
+
+        if (defaultOffset < source->encodingCount)
+            defaultIndex = source->encoding[defaultOffset];
+    }
     *glyphCount = 0;
     while (count--) {
         int index = lookupGlyphIndex(source, &chars, encoding);

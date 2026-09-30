@@ -132,8 +132,8 @@ make check
 
 Despite the historical option name, this configuration has working font
 support. It registers a `built-ins` font-path element containing the X.Org
-6x13 `fixed` font and complete cursor font, and links neither libXfont nor
-libfontenc. Supported aliases and generated-data provenance are documented in
+complete 4,121-glyph ISO10646-1 6x13 `fixed` font and complete cursor font,
+and links neither libXfont nor libfontenc. Supported aliases and generated-data provenance are documented in
 [`fonts/README.md`](../fonts/README.md).
 
 The Autotools build remains the reference for `Xfbdev`, `Xvesa`, native Xtrans

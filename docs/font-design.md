@@ -123,7 +123,7 @@ in a small `fonts/` subdirectory without becoming a public interface.
 
 Check in generated C data for:
 
-- the ISO-8859-1 subset of X.Org's 6x13 fixed font;
+- the complete BMP repertoire of X.Org's 6x13 ISO10646-1 fixed font;
 - the complete X.Org cursor font, including source/mask glyph pairs.
 
 Also check in the generator and source provenance so regeneration is
@@ -138,9 +138,11 @@ The generator should reject malformed or unsupported BDF input and emit:
 - font bounds, ascent, descent, default character, and properties;
 - explicit encoding-to-glyph lookup tables.
 
-Only encodings 0 through 255 are retained from the modern Unicode 6x13 BDF.
-This intentionally matches the historical ISO-8859-1 built-in font rather
-than embedding thousands of glyphs.
+The initial Phase 7 implementation retained encodings 0 through 255. The
+post-Phase-9 font expansion now retains all 4,121 source glyphs in the 16-bit
+BMP encoding space so the canonical ISO10646-1 font requested by xterm works
+without host fonts. Historical ISO8859-1 names remain aliases to the same
+font.
 
 Generated arrays are one implementation of an internal decoded-font view;
 they must not become inputs that the materializer references directly by
@@ -305,7 +307,8 @@ consistent with the rest of the provisional embedding core.
 ### Generator and backend tests
 
 - verify source hashes and deterministic generated output;
-- validate the fixed font's 256-character encoding and default character;
+- validate the fixed font's complete 16-bit encoding map, representative
+  non-Latin glyphs, and default character;
 - validate all cursor source/mask pairs and representative hotspots;
 - exercise each `FontEncoding` lookup mode and missing-glyph behavior;
 - exercise supported bitmap bit orders and glyph padding;

@@ -1018,8 +1018,10 @@ Fonts cross several layers:
 The default native build uses libXfont's filesystem backend and preserves its
 configured directory paths. The `--disable-fonts` build instead registers the
 host-independent `built-ins` FPE in `dix/embedded-font.c`. Its internal catalog
-serves checked-in, development-time-generated 6x13 and cursor data. An
-acquire/release lease separates catalog ownership from conversion into an
+serves checked-in, development-time-generated 6x13 and cursor data. The 6x13
+font includes its complete 4,121-glyph BMP repertoire and both ISO10646-1 and
+historical ISO8859-1 names. An acquire/release lease separates catalog
+ownership from conversion into an
 ordinary `FontRec`, so a later embedding provider can reuse the materializer
 without exposing DIX structures. Phase 7 intentionally exposes only the
 built-in catalog.

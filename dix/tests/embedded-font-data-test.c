@@ -51,7 +51,9 @@ main(void)
         fprintf(stderr, "invalid embedded font data\n");
         return 1;
     }
-    if (tinyxEmbeddedFixedFont.encodingCount != 256 ||
+    if (tinyxEmbeddedFixedFont.encodingCount != 65536 ||
+        tinyxEmbeddedFixedFont.glyphCount <= 256 ||
+        tinyxEmbeddedFixedFont.encoding[0x2500] < 0 ||
         tinyxEmbeddedCursorFont.encodingCount != 154 ||
         tinyxEmbeddedCursorFont.glyphCount != 154) {
         fprintf(stderr, "unexpected embedded font encoding range\n");

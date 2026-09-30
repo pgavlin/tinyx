@@ -21,7 +21,9 @@ fonts/generate-builtin-fonts.py \
   --output dix/embedded-font-data.c
 ```
 
-The generator checks the structure of every retained glyph. It keeps the
-0–255 encoding range from 6x13 and all 154 cursor glyphs. Generated bitmaps use
-compact MSB-first rows; the runtime materializer converts them to the format
-requested by DIX.
+The generator checks the structure of every retained glyph. It keeps all 4,121
+glyphs from the source 6x13 ISO10646-1 font in a sparse two-byte encoding and
+all 154 cursor glyphs. The full 6x13 name used by xterm is available alongside
+`fixed`, `6x13`, and historical ISO8859-1 aliases. Generated bitmaps use compact
+MSB-first rows; the runtime materializer converts them to the format requested
+by DIX.
