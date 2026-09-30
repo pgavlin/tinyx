@@ -9,6 +9,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -441,14 +442,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
     let server = Server::create(screen.width, screen.height)?;
     let terminal = TerminalGuard::enter()?;
+    let terminal_events = terminal_event_reader();
     let mut stdout = io::stdout();
     let mut clients = HashMap::<u64, Connection>::new();
     let mut next_client = 1_u64;
     let mut keyboard = KeyboardState::default();
     let mut pressed_buttons = HashSet::new();
     let mut frame_dirty = true;
-    let mut framebuffer_snapshot = Vec::new();
-    let mut missed_damage_reported = false;
     let mut current_image_id = None;
     let mut next_image_id = 1_u32;
     let mut next_frame = Instant::now();
@@ -566,8 +566,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        while event::poll(Duration::ZERO)? {
-            let terminal_event = event::read()?;
+        loop {
+            let terminal_event = match terminal_events.try_recv() {
+                Ok(event) => event?,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    return Err("terminal event reader stopped".into());
+                }
+            };
             logger.write(format_args!("terminal event: {terminal_event:?}"));
             match terminal_event {
                 Event::Key(key)
@@ -639,17 +645,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if Instant::now() >= next_frame {
-            let damaged = server.take_damage()?;
-            let framebuffer_changed =
-                server.framebuffer_snapshot_changed(&mut framebuffer_snapshot)?;
-            let changed_without_damage = framebuffer_changed && !damaged;
-            frame_dirty |= damaged || framebuffer_changed;
-            if changed_without_damage && !missed_damage_reported {
-                logger.write(format_args!(
-                    "framebuffer changed without a Damage notification; enabling snapshot fallback"
-                ));
-                missed_damage_reported = true;
-            }
+            frame_dirty |= server.take_damage()?;
             if frame_dirty {
                 let png = server.encode_png()?;
                 let viewport = Viewport::current();
@@ -681,6 +677,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         thread::sleep(Duration::from_millis(2));
     }
+}
+
+fn terminal_event_reader() -> mpsc::Receiver<io::Result<Event>> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        loop {
+            let event = event::read();
+            let failed = event.is_err();
+            if sender.send(event).is_err() || failed {
+                break;
+            }
+        }
+    });
+    receiver
 }
 
 fn apply_key_event(

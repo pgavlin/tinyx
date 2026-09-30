@@ -323,26 +323,6 @@ impl Server {
         Ok(info)
     }
 
-    pub fn framebuffer_snapshot_changed(&self, previous: &mut Vec<u8>) -> Result<bool, String> {
-        let info = self.framebuffer_info()?;
-        let pixels = unsafe { std::slice::from_raw_parts(info.pixels.cast::<u8>(), info.size) };
-        let row_size = info.width as usize * 4;
-        let required = row_size * info.height as usize;
-        let mut changed = previous.len() != required;
-        if changed {
-            previous.resize(required, 0);
-        }
-        for y in 0..info.height as usize {
-            let source = &pixels[y * info.stride_bytes..][..row_size];
-            let destination = &mut previous[y * row_size..][..row_size];
-            if source != destination {
-                destination.copy_from_slice(source);
-                changed = true;
-            }
-        }
-        Ok(changed)
-    }
-
     pub fn encode_png(&self) -> Result<Vec<u8>, String> {
         let info = self.framebuffer_info()?;
         let pixels = unsafe { std::slice::from_raw_parts(info.pixels.cast::<u8>(), info.size) };
