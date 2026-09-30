@@ -227,8 +227,8 @@ backpressure. Memory readiness is merged with native readiness before DIX
 priority selection, and server grabs, ignored clients, request budgets, and
 round-robin dispatch apply to both kinds of client.
 
-The interface is intentionally provisional until the phase 13 embedding facade
-is frozen. In-process clients are trusted by their embedding host and bypass
+The interface remains private and provisional behind the public embedding
+facade. In-process clients are trusted by their embedding host and bypass
 native peer-address authorization; native clients retain existing Xtrans
 access control.
 
@@ -458,15 +458,18 @@ the complete 154-glyph cursor set.
 
 ## Phase 8: Define the public embedding API
 
-Freeze the public interface only after the internal lifecycle, transport,
-display, input, and runtime seams have working implementations.
+Consolidate the public interface only after the internal lifecycle, transport,
+display, input, and runtime seams have working implementations. The resulting
+facade remains prerelease and may evolve with its in-tree consumers until an
+explicit API-stability milestone.
 
 ### Design
 
-[Phase 8 Embedding API](embedding-api-design.md) records the locked v1 API and
-its ownership, scheduling, error, poisoning, threading, ABI, and symbol
-visibility contracts. The API is expressed in host terms rather than X server
-internals and specifies:
+[Phase 8 Embedding API](embedding-api-design.md) records the current
+prerelease API and its ownership, scheduling, error, poisoning, threading, and
+symbol-visibility contracts. Its current version and structure-size fields do
+not promise source or binary compatibility. The API is expressed in host terms
+rather than X server internals and specifies:
 
 - singleton behavior despite the opaque server handle;
 - ownership and lifetime of server, clients, buffers, and callback data;

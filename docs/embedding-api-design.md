@@ -2,9 +2,17 @@
 
 ## Status
 
-The v1 API described here is locked and implemented by `include/tinyx.h` and
-`kdrive/memory/api.c`. Minor versions may make only the compatible additions
-described below; incompatible changes require a new API major version.
+The API described here is implemented by `include/tinyx.h` and
+`kdrive/memory/api.c`, but remains prerelease and intentionally unstable.
+TinyX and its in-tree embedders are currently its only consumers, so API and
+ABI changes may be made whenever they improve the design. Such changes must
+update the public header, implementation, documentation, tests, examples,
+WASM exports, and in-tree consumers together.
+
+Current version numbers identify the header and configuration contract used by
+a build; they do not promise backward source or binary compatibility. The
+project will declare a separate release milestone before compatibility rules
+become binding.
 
 The API consolidates the provisional lifecycle, host, memory-client,
 memory-display, and input interfaces behind one host-oriented facade. DIX,
@@ -22,7 +30,8 @@ The first public API should provide:
 - pointer and keyboard injection;
 - host time, logging, wakeup, LED, and bell callbacks;
 - explicit ownership, threading, reentrancy, and fatal-error rules;
-- a versioning strategy that permits compatible structure extension.
+- version fields that detect mismatched headers and implementations and can
+  support a stable compatibility policy after release.
 
 The first version does not attempt to provide concurrent server instances,
 thread safety, native listeners, generation reset, or a public font-provider
@@ -566,18 +575,18 @@ server.
 ## ABI and symbol policy
 
 Opaque handles isolate public consumers from DIX and KDrive structure layouts.
-Configuration structures, including `tinyx_screen_config`, begin with
-`struct_size`. Callers initialize them through API functions, and
-implementations inspect only fields present in the reported size. The server
-configuration refers to its initial screen by pointer so the two structures
-can evolve independently.
+Configuration structures currently begin with `struct_size`, and callers
+initialize them through API functions. These conventions provide validation
+and leave room for a future compatible-extension policy, but they do not make
+the prerelease ABI stable.
 
-The API remains prerelease. API 1.2 enlarged `tinyx_screen_config`, so callers
-must rebuild against the matching header and library. `struct_size` still
-allows validation and leaves room for a stable compatible-extension policy
-once the ABI is released. After that point, removing a field, changing an
-existing field's meaning, or changing an existing function signature will
-require a major API version.
+Until the project explicitly declares the embedding API released, callers must
+build against matching headers and libraries. Structures may be reordered or
+replaced, fields and functions may change meaning or signature, and version
+numbers may advance without preserving old layouts. In-tree consumers are
+updated atomically with each such change. Once a stable ABI is declared, this
+section must be replaced with the compatibility rules that releases will
+actually enforce.
 
 Only deliberate `tinyx_*` public facade symbols should be exported. The
 following remain private:
