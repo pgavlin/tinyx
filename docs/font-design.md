@@ -5,7 +5,7 @@
 This document records the implemented Phase 7 architecture. The built-in
 catalog, decoded-font materializer, and FPE are complete. The subsequent
 [Host-Provided Bitmap Font Design](font-provider-design.md) defines the
-proposed BDF/PCF registration API and parser architecture.
+proposed frozen-manifest, constrained-pull API and BDF/PCF parser architecture.
 
 ## Goals
 

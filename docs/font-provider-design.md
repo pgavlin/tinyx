@@ -7,23 +7,33 @@ host-provided BDF and PCF fonts into the embedded TinyX server. It follows the
 filesystem-free built-in font backend described in
 [Phase 7 Font Architecture](font-design.md), but is not yet implemented.
 
-The first implementation should use synchronous push registration. A host
-acquires and, when necessary, decompresses a font file, then gives TinyX one
-uncompressed BDF or PCF byte span before exposing any logical clients. TinyX
-parses and copies the font during that call. Protocol dispatch never calls back
-into the host to acquire a font.
+The first implementation should use a synchronous, constrained pull provider.
+Before exposing logical clients, a host installs one provider and registers an
+immutable manifest of canonical font names, aliases, formats, and opaque source
+identifiers. TinyX uses that manifest for name lookup and listing, but acquires
+an uncompressed BDF or PCF byte span from the provider only when protocol work
+first requires that font's contents. TinyX parses and copies the font during
+that acquisition, releases the provider's byte lease before resuming protocol
+dispatch, and caches the decoded result for the rest of the server lifetime.
+
+The provider callback is deliberately not an I/O API. It must synchronously
+return already-available bytes, must not block, and must not reenter TinyX.
+Filesystem access, fetching, decompression, and readiness remain host
+responsibilities.
 
 ## Goals
 
 The host-font facility should:
 
-- load ordinary BDF and PCF bitmap fonts without libXfont or a filesystem;
+- load ordinary BDF and PCF bitmap fonts without libXfont or a core filesystem;
 - work identically in native static-library and WebAssembly builds;
 - preserve the existing DIX FPE, font resource, query, and rendering paths;
 - keep `fixed` and `cursor` available without host participation;
-- allow a host to register canonical XLFD names and aliases;
+- expose a stable pre-client catalog of canonical XLFD names and aliases;
+- acquire and parse a font only when its metrics or glyphs are first needed;
+- avoid copying or retaining provider source bytes after parsing;
 - report malformed or unsupported data without poisoning the server;
-- copy input synchronously so hosts do not manage font-data leases;
+- express provider byte ownership with an explicit acquire/release lease;
 - bound parser memory, arithmetic, and recursion hazards;
 - keep the public API free of `FontRec`, FPE, KDrive, and libXfont types.
 
@@ -32,18 +42,20 @@ The initial facility does not need to:
 - load scalable OpenType, TrueType, Type 1, SNF, or font-server fonts;
 - implement fontconfig or pathname search inside TinyX;
 - decompress `.gz`, `.Z`, `.bz2`, or `.xz` streams;
-- lazily invoke a host callback from an X11 `OpenFont` request;
-- remove or replace a registered font during a server generation;
+- perform filesystem or network I/O from a provider callback;
+- suspend an `OpenFont` request for asynchronous acquisition;
+- remove or replace a manifest entry during a server generation;
 - override the built-in `fixed` or `cursor` names;
-- expose asynchronous acquisition or cancellation.
+- evict successfully decoded fonts during the server lifetime;
+- retry a provider or parser failure during the same server lifetime.
 
 Modern Xft clients continue to rasterize client-side fonts and send glyphs
 through RENDER. This design is for core X11 server-side bitmap fonts used by
 legacy clients and toolkits.
 
-## Why push registration
+## Why constrained pull
 
-Three acquisition models were considered.
+Four acquisition models were considered.
 
 ### Let the embedded server read host paths
 
@@ -53,30 +65,49 @@ It also does not translate naturally to browsers or other WASM hosts.
 
 **Decision:** do not add filesystem operations to the embedded core.
 
-### Invoke a host provider during `OpenFont`
+### Push complete fonts before clients
 
-A provider callback could lazily return bytes for an arbitrary requested name.
-However, the callback would run inside request dispatch and the protected fatal
-boundary. It would need reentrancy, ownership, timeout, cancellation, caching,
-and asynchronous wakeup rules. `ListFonts` would additionally require stable
-provider enumeration while a client request is in progress.
+A host could perform its own I/O and decompression, then give TinyX every
+uncompressed byte span before clients exist. This creates a simple explicit
+failure boundary and lets TinyX validate the complete catalog eagerly.
+However, it also requires every advertised font to be transferred, parsed, and
+retained even if no client ever requests it. A host that already owns or caches
+font assets must duplicate work and decoded storage up front.
 
-**Decision:** defer pull callbacks. The internal catalog lease remains capable
-of supporting them later, but they are unnecessary for initial host loading.
+**Decision:** do not require eager payload registration.
 
-### Register complete fonts before clients
+### Resolve arbitrary names during `OpenFont`
 
-The host performs its own I/O and decompression, calls TinyX with an
-uncompressed byte span, and can discard that span when the call returns.
-Registration happens at an explicit API boundary rather than from protocol
-dispatch. The resulting catalog is immutable while clients can observe it.
+A provider callback could receive an arbitrary client-supplied font name and
+return bytes. That leaves `ListFonts` and `ListFontsWithInfo` without a stable
+namespace, permits the visible catalog to change during dispatch, and makes
+aliases and wildcard matching host policy. If acquisition can block or return
+pending, it additionally requires request suspension, cancellation, wakeups,
+timeouts, and client-death handling.
 
-**Decision:** use synchronous push registration.
+**Decision:** do not make the provider an open-ended name resolver and do not
+support asynchronous acquisition in the initial API.
+
+### Register a manifest and pull payloads by source identifier
+
+The host declares the complete visible namespace before clients open. TinyX
+copies and freezes that namespace, performs wildcard matching and alias
+resolution itself, and calls the provider only with an opaque identifier from
+a validated manifest entry. The provider returns already-available,
+uncompressed bytes under a short-lived lease. TinyX parses once and caches the
+host-neutral decoded font.
+
+This preserves deterministic protocol enumeration while avoiding eager parsing
+and source-byte duplication. It also matches the acquire/release seam already
+used by the embedded FPE.
+
+**Decision:** use an immutable pushed manifest with synchronous pulled
+payloads.
 
 ## Public API
 
 The addition should increment `TINYX_API_VERSION_MINOR`. It adds new types and
-functions without extending any existing structure.
+functions without extending existing structures.
 
 An illustrative API is:
 
@@ -87,25 +118,43 @@ typedef enum tinyx_font_format {
     TINYX_FONT_FORMAT_PCF = 2
 } tinyx_font_format;
 
-typedef struct tinyx_font_config {
+typedef struct tinyx_font_provider_ops {
     uint32_t struct_size;
+
+    tinyx_status (*acquire)(void *userdata,
+                            uint64_t source_id,
+                            const void **bytes,
+                            size_t *length,
+                            void **lease,
+                            tinyx_error *error);
+    void (*release)(void *userdata, void *lease);
+} tinyx_font_provider_ops;
+
+typedef struct tinyx_font_source {
+    uint32_t struct_size;
+    uint64_t source_id;
     tinyx_font_format format;
 
-    /* Optional catalog name in addition to the font's canonical XLFD. */
-    const char *primary_name;
+    /* Required catalog name and expected BDF/PCF canonical FONT value. */
+    const char *canonical_name;
 
     /* Optional additional names for the same immutable font. */
     const char *const *aliases;
     size_t alias_count;
-} tinyx_font_config;
+} tinyx_font_source;
 
-void tinyx_font_config_init(tinyx_font_config *config);
+void tinyx_font_provider_ops_init(tinyx_font_provider_ops *ops);
+void tinyx_font_source_init(tinyx_font_source *source);
 
-tinyx_status tinyx_server_add_font(
+tinyx_status tinyx_server_set_font_provider(
     tinyx_server *server,
-    const tinyx_font_config *config,
-    const void *bytes,
-    size_t length,
+    const tinyx_font_provider_ops *ops,
+    void *userdata,
+    tinyx_error *error);
+
+tinyx_status tinyx_server_add_font_source(
+    tinyx_server *server,
+    const tinyx_font_source *source,
     tinyx_error *error);
 
 tinyx_status tinyx_server_add_font_alias(
@@ -118,56 +167,110 @@ tinyx_status tinyx_server_add_font_alias(
 Exact names remain provisional until implementation, but the semantics below
 are required.
 
-### Registration timing
+### Configuration and freeze timing
 
 A server is created first so startup can use the guaranteed built-in `fixed`
-and `cursor` fonts. The host then registers all additional fonts and aliases
-before opening its first `tinyx_client`.
+and `cursor` fonts. The host then installs one provider, registers every source
+manifest entry, and adds any aliases before opening its first `tinyx_client`.
 
-The first successful `tinyx_client_open()` freezes the font catalog.
-Subsequent font or alias registration returns
-`TINYX_ERROR_INVALID_STATE`. This avoids changing `ListFonts` results during a
-suspended or partially dispatched request and avoids defining removal or
-replacement semantics for open font resources.
+The first successful `tinyx_client_open()` freezes the manifest. Subsequent
+provider replacement, source registration, or alias registration returns
+`TINYX_ERROR_INVALID_STATE`. This keeps `ListFonts` deterministic while
+requests are dispatched and avoids defining removal or replacement semantics
+for open font resources.
 
 A typical host sequence is:
 
 ```c
 tinyx_server_create(&server_config, &server, &error);
 
-tinyx_font_config_init(&font_config);
-font_config.format = TINYX_FONT_FORMAT_PCF;
-font_config.aliases = aliases;
-font_config.alias_count = alias_count;
-tinyx_server_add_font(server, &font_config, pcf, pcf_size, &error);
+tinyx_font_provider_ops_init(&provider_ops);
+provider_ops.acquire = acquire_font;
+provider_ops.release = release_font;
+tinyx_server_set_font_provider(server, &provider_ops, host_fonts, &error);
 
-/* Add aliases from fonts.alias only after their target fonts exist. */
-tinyx_server_add_font_alias(server, "9x15", canonical_name, &error);
+tinyx_font_source_init(&source);
+source.source_id = FONT_9X15;
+source.format = TINYX_FONT_FORMAT_PCF;
+source.canonical_name = canonical_9x15_name;
+source.aliases = aliases;
+source.alias_count = alias_count;
+tinyx_server_add_font_source(server, &source, &error);
 
-/* Catalog becomes immutable here. */
+/* Aliases from fonts.alias may also be added separately. */
+tinyx_server_add_font_alias(server, "9x15", canonical_9x15_name, &error);
+
+/* Manifest becomes immutable here. Payloads remain lazily acquired. */
 tinyx_client_open(server, &client_config, &client);
 ```
 
+The provider may be omitted when only built-in fonts are needed. A provider
+must be installed before adding host sources. Only one provider may be
+installed in the initial API, and it cannot be replaced after any source is
+registered.
+
 The API remains singleton, server-thread-only, non-thread-safe, and
-non-reentrant. Font registration must not occur from a TinyX host callback.
+non-reentrant. Provider configuration must not occur from a TinyX callback.
 
-### Input ownership
+### Provider callback contract
 
-`bytes`, `primary_name`, the alias pointer array, each alias string, and
-`tinyx_error` are borrowed only for the duration of the call. TinyX either
-publishes a complete independently owned decoded font or publishes nothing.
-The host may free or reuse every input after the call returns.
+`acquire` is invoked from protocol dispatch after TinyX resolves a frozen
+manifest entry. Its `source_id` is exactly the value copied from that entry;
+client-controlled names are never passed to the provider.
 
-Registration does not retain compressed source bytes and does not retain
-pointers into the caller's buffer. Open `FontRec` instances acquire ordinary
-catalog leases over immutable decoded data owned by the server catalog.
+The callback must:
+
+- return synchronously and promptly;
+- perform no filesystem, network, or other potentially blocking operation;
+- return an uncompressed BDF or PCF span already available to the host;
+- return a non-null lease on success, even when the bytes have static lifetime;
+- keep `bytes[0..length]` valid and immutable until `release`;
+- avoid calling any TinyX API, directly or indirectly;
+- write only bounded diagnostic text to the supplied `tinyx_error`.
+
+`release` is called exactly once after every successful acquisition, including
+format mismatch, parse failure, validation failure, and allocation failure.
+TinyX does not retain pointers into provider storage after release. The release
+callback must also be synchronous and non-reentrant.
+
+`TINYX_ERROR_WOULD_BLOCK` is not a supported acquisition result in the initial
+API because dispatch has no public pending-font operation. Hosts must acquire,
+fetch, map, or decompress assets before accepting clients that may request
+them. Asynchronous host work can invoke the ordinary host wakeup mechanism,
+but cannot resume an already failed font request.
+
+The provider operations are copied. `userdata` is borrowed and must remain
+valid until `tinyx_server_destroy()` returns. Provider callbacks are never
+invoked after destruction returns. If fatal poisoning prevents safe core
+teardown, TinyX clears callbacks before returning control so stranded internal
+objects cannot call dead host state.
+
+A successful payload is parsed and cached on first use. The provider is not
+called again for that source during the server lifetime. Provider and parser
+failures are also cached as terminal failures, preventing repeated callbacks
+or repeated parsing from client requests. A client observes ordinary font-open
+failure; the detailed diagnostic is sent to the configured host logger and
+retained where practical as server diagnostic state.
+
+### Manifest ownership
+
+`canonical_name`, the alias pointer array, each alias string, and `tinyx_error`
+are borrowed only for the duration of a registration call. TinyX validates and
+copies the complete manifest entry atomically. The host may free or reuse every
+manifest input after the call returns.
+
+`source_id` is an opaque value interpreted only by the host. It must be unique
+among host font sources and remains associated with its copied manifest entry.
+No pointer is encoded in the identifier, which keeps the API portable across
+native and WebAssembly hosts.
 
 ### Names and aliases
 
-A BDF `FONT` declaration or PCF `FONT` property supplies the canonical XLFD
-and is required. `primary_name`, when present, adds another lookup name; it
-does not rewrite the font's `FONT` property. Each entry in `aliases` behaves
-the same way.
+Every source declares its expected canonical name before clients exist. The
+BDF `FONT` declaration or PCF `FONT` property must compare equal to that name
+when the payload is first parsed. A mismatch permanently fails the source and
+is reported as malformed provider data. Requiring the name in the manifest
+prevents lazy parsing from adding a new protocol-visible name after freeze.
 
 Names:
 
@@ -175,52 +278,60 @@ Names:
 - are limited to 255 bytes, matching the embedded FPE's request handling;
 - compare case-insensitively as existing core font names do;
 - may contain XLFD punctuation but not embedded NUL bytes;
-- must be unique across built-ins, registered fonts, and aliases.
+- must be unique across built-ins, source names, and aliases.
 
-`tinyx_server_add_font_alias()` resolves `target` immediately and stores a
-direct reference to the decoded font. The target must already exist. There are
-therefore no alias chains or cycles in the catalog representation.
+`tinyx_server_add_font_alias()` resolves `target` immediately to a built-in or
+host source and stores a direct reference. The target must already exist.
+There are therefore no alias chains or cycles in the catalog representation.
+Aliases supplied with a source are published atomically with that source.
 
 The initial policy rejects every duplicate name with
 `TINYX_ERROR_ALREADY_EXISTS`, even if it would refer to the same font. Built-in
 names, including `fixed` and `cursor`, cannot be replaced. A later API may add
 an explicit override namespace if a demonstrated use case requires it.
 
-Aliases are included in `ListFonts` and `ListFontsWithInfo`, consistent with
-the current built-in catalog.
+Manifest names and aliases are included in `ListFonts` without acquiring their
+payloads. `ListFontsWithInfo`, `OpenFont`, and any other operation requiring
+metrics or properties may acquire and parse matching sources. A single
+`ListFontsWithInfo` request can therefore invoke the provider for multiple
+previously unused fonts; the prompt, nonblocking callback contract applies to
+each invocation.
 
 ### Formats and compression
 
 `TINYX_FONT_FORMAT_AUTO` recognizes uncompressed BDF from its `STARTFONT`
-header and uncompressed PCF from its file magic. Unknown data returns
-`TINYX_ERROR_UNSUPPORTED`.
+header and uncompressed PCF from its file magic. Unknown data produces a
+terminal unsupported-source failure.
 
-The core does not decompress files. A host loading `font.pcf.gz` must
-uncompress it and register the resulting PCF bytes. This keeps zlib and other
-compression libraries out of native and WASM core products and lets each host
-use its natural streaming APIs.
+The core does not decompress files. A host advertising `font.pcf.gz` must make
+the uncompressed PCF bytes synchronously available to `acquire`. This keeps
+zlib and other compression libraries out of native and WASM core products and
+lets each host use its natural acquisition and decompression APIs outside
+protocol dispatch.
 
-A format explicitly selected by the caller must match the supplied bytes.
+A format explicitly selected in the manifest must match the acquired bytes.
 Trailing bytes are rejected unless the selected file format explicitly permits
 them.
 
 ### Errors
 
-The operation returns:
+Configuration operations return:
 
-- `TINYX_ERROR_INVALID_ARGUMENT` for malformed data, invalid names, invalid
-  structure sizes, or impossible metrics;
-- `TINYX_ERROR_UNSUPPORTED` for a recognized but unsupported format or feature;
-- `TINYX_ERROR_ALREADY_EXISTS` for any colliding catalog name;
-- `TINYX_ERROR_OUT_OF_MEMORY` for allocation failure;
-- `TINYX_ERROR_INVALID_STATE` after the catalog is frozen or generation end;
+- `TINYX_ERROR_INVALID_ARGUMENT` for invalid structures, callbacks, names, or
+  identifiers;
+- `TINYX_ERROR_ALREADY_EXISTS` for a second provider, duplicate source
+  identifier, or colliding catalog name;
+- `TINYX_ERROR_OUT_OF_MEMORY` for manifest allocation failure;
+- `TINYX_ERROR_INVALID_STATE` after manifest freeze or generation end;
 - `TINYX_ERROR_FATAL` only if an unrelated fatal server invariant unwinds the
   protected operation.
 
-`tinyx_error.message` should identify the format, table or BDF section, and
-byte offset or line number when practical. Parser errors are ordinary API
-errors: malformed host input must never call `FatalError()` or poison the
-server.
+Acquisition and parse failures happen during protocol dispatch rather than the
+configuration call. They must never call `FatalError()` or poison the server.
+They map to ordinary X11 errors appropriate to the FPE operation, principally
+`BadName` for an unavailable or malformed font and `BadAlloc` for allocation
+failure. The host diagnostic should identify the source identifier, format,
+table or BDF section, and byte offset or line number when practical.
 
 ## Internal architecture
 
@@ -243,38 +354,52 @@ Generated built-ins and parsed fonts must produce exactly the same decoded
 view. The DIX materializer must not know whether a view came from generated C,
 BDF, or PCF.
 
-### Mutable-before-freeze catalog
+### Frozen manifest and lazy source state
 
 The current private built-in catalog in `dix/embedded-font.c` should be
-extracted into an internal catalog component with these conceptual operations:
+extracted into an internal catalog component. Conceptually it stores:
+
+- borrowed process-lifetime built-in decoded fonts;
+- copied host source manifests and direct alias mappings;
+- copied provider operations and borrowed provider userdata;
+- per-source states: unloaded, loading, decoded, or terminal failure;
+- owned decoded fonts produced by successful lazy parsing.
+
+Its operations resemble:
 
 ```c
-int TinyXFontCatalogAddOwned(TinyXOwnedDecodedFont *font,
-                             const char *const *names,
-                             size_t name_count);
+int TinyXFontCatalogSetProvider(const TinyXFontProvider *provider);
+int TinyXFontCatalogAddSource(const TinyXFontSourceManifest *source);
 int TinyXFontCatalogAddAlias(const char *alias, const char *target);
 void TinyXFontCatalogFreeze(void);
+int TinyXFontCatalogAcquire(const char *name, TinyXDecodedFontLease *lease);
 void TinyXFontCatalogReset(void);
 ```
 
-The actual return type should distinguish malformed input, duplicates,
-unsupported features, and allocation failure without using public API types in
-DIX.
+The actual result type should distinguish provider, malformed-data,
+unsupported-feature, duplicate, and allocation failures without using public
+API types in DIX.
 
-Generated built-ins are installed first as borrowed process-lifetime entries.
-Parsed fonts are owned generation entries. Catalog publication is atomic:
-parsing, name validation, all allocations, and duplicate checks complete before
-any name becomes visible.
+Built-ins are installed first. Source registration validates and allocates all
+names before atomically publishing an entry. Catalog entries never move after
+publication. Name lookup storage may be reallocated because aliases and leases
+refer to stable source/font objects rather than table slots. The first client
+freezes provider, source, and alias collections.
 
-Catalog entries never move after publication. Name lookup tables may be
-reallocated because leases refer to stable font objects rather than table
-slots. The first client freezes both name and font collections.
+On first acquire, a source transitions from unloaded to loading. Reentrant
+lookup of the same or another host source while this state is active is an API
+contract violation and fails safely. Successful parsing publishes one owned
+immutable decoded font and transitions to decoded before the materializer sees
+it. Failure stores a bounded terminal diagnostic and transitions to terminal
+failure. No partially decoded object becomes visible.
 
 `FreeFonts()` closes all `FontRec` instances before parsed catalog storage is
-released. On an ordinary shutdown, the facade resets the dynamic catalog only
+released. On ordinary shutdown, the facade resets the dynamic catalog only
 after generation teardown. If the singleton is poisoned and core teardown is
-unsafe, retaining catalog allocations until process or module disposal is
-preferable to freeing data that a stranded `FontRec` may still reference.
+unsafe, retaining decoded catalog allocations until process or module disposal
+is preferable to freeing data that a stranded `FontRec` may still reference.
+Host callbacks must nevertheless be detached before control returns after a
+fatal unwind.
 
 ### Parsers
 
@@ -310,8 +435,8 @@ The initial parser should support BDF 2.1 and 2.2 files with:
 
 `SWIDTH` is validated syntactically but does not affect bitmap materialization.
 Vertical metrics, multiple writing directions, nonzero `DWIDTH` Y values, and
-encodings outside the X11 16-bit space should initially return
-`TINYX_ERROR_UNSUPPORTED` rather than being silently misinterpreted.
+encodings outside the X11 16-bit space should initially return an unsupported
+parse result rather than being silently misinterpreted.
 
 The parser must verify declared counts, exact bitmap row widths, hexadecimal
 syntax, duplicate encodings, duplicate required fields, and required end
@@ -337,7 +462,7 @@ and bitmap spans are checked against the supplied byte length before use.
 Accelerator tables may be validated and ignored because decoded bounds are
 recomputed from glyph metrics. Ink metrics may also be ignored initially; the
 ordinary metrics and bitmaps remain authoritative for core text rendering.
-Unsupported PCF table formats return `TINYX_ERROR_UNSUPPORTED`.
+Unsupported PCF table formats return an unsupported parse result.
 
 The implementation may adapt the permissively licensed X.Org PCF algorithms,
 but should not import libXfont's file, compression, cache, or `FontRec`
@@ -358,12 +483,15 @@ limits should include:
 - bounded BDF line and property-string lengths;
 - metrics and bitmap dimensions representable by the existing X font ABI.
 
-These limits are implementation constants, not public configuration in the
-first version. They can be relaxed compatibly after profiling real fonts.
-Every count, offset, stride, area, and cumulative size uses checked arithmetic.
+The manifest should additionally bound the number of host sources, total
+aliases, and total copied name bytes so an embedder cannot create an unbounded
+`ListFonts` workload before freeze. Exact limits should be implementation
+constants rather than public configuration in the first version.
 
+Every count, offset, stride, area, and cumulative size uses checked arithmetic.
 After parsing, one shared validator verifies:
 
+- the parsed canonical name matches the frozen manifest;
 - ordered encoding bounds and exact map dimensions;
 - valid glyph indexes or the missing sentinel;
 - every metric fits `xCharInfo` when materialized;
@@ -377,17 +505,22 @@ After parsing, one shared validator verifies:
 A native host may:
 
 1. read `fonts.dir` and `fonts.alias` using its own filesystem policy;
-2. read and decompress selected `.pcf.gz` files;
-3. register each uncompressed PCF;
-4. add aliases after their targets exist;
-5. open its first logical client.
+2. assign stable numeric source identifiers and register the complete manifest;
+3. read, map, and decompress selected `.pcf.gz` files before clients can request
+   them;
+4. serve the resulting uncompressed spans synchronously from `acquire`;
+5. retain or discard its source cache after TinyX calls `release`, according to
+   host policy.
 
-A browser host may fetch or bundle font assets, decompress them with browser or
-JavaScript facilities, copy the uncompressed bytes into WASM memory for the
-registration call, then release that temporary allocation.
+A browser host may fetch or bundle font assets and decompress them with browser
+or JavaScript facilities before accepting clients. Its provider then exposes
+already-resident bytes to WASM for the duration of acquisition. The host may
+release its original asset after successful parsing if it knows no other
+consumer needs it; TinyX retains its own decoded copy.
 
-TinyX does not watch directories, infer font paths, resolve filenames, or
-perform locale fallback. Which fonts are made available remains host policy.
+TinyX does not watch directories, infer font paths, resolve filenames, fetch
+URLs, perform locale fallback, or invoke asynchronous host work. Which fonts
+are advertised and how their payloads become ready remain host policy.
 
 ## Testing
 
@@ -407,26 +540,33 @@ perform locale fallback. Which fonts are made available remains host policy.
 Normal builds must not require `bdftopcf`; checked-in fixtures should include
 source provenance and deterministic regeneration instructions.
 
-### Catalog and API tests
+### Provider, catalog, and API tests
 
-- register a BDF and a PCF before opening a client;
-- register primary names and aliases and list each through X11;
-- reject collisions with built-ins and previously registered names;
-- verify a failed multi-alias registration publishes nothing;
-- freeze registration on the first client open;
-- verify input bytes can be freed immediately after registration;
-- open and close multiple `FontRec` instances over one registered font;
-- shut down with registered fonts still open;
-- preserve ordinary parser errors without poisoning the server.
+- install one provider and reject replacement;
+- register BDF and PCF source manifests before opening a client;
+- register canonical names and aliases and list them without acquisition;
+- reject duplicate source identifiers and collisions with built-ins;
+- verify failed multi-alias registration publishes nothing;
+- freeze provider and manifest changes on the first client open;
+- verify `OpenFont` receives the expected opaque source identifier;
+- verify acquired bytes are released after success and every failure path;
+- verify source bytes may be freed immediately from `release`;
+- verify successful decoding and terminal failures are each cached;
+- reject callback reentrancy without corrupting catalog state;
+- open and close multiple `FontRec` instances over one decoded font;
+- shut down with registered sources and fonts still open;
+- detach callbacks safely after fatal poisoning.
 
 ### Protocol and rendering tests
 
 Through a descriptor-free client:
 
-- `ListFonts`, `OpenFont`, `QueryFont`, and `CloseFont` a registered font;
+- `ListFonts` a registered source without invoking its provider;
+- `ListFontsWithInfo`, `OpenFont`, `QueryFont`, and `CloseFont` a host source;
 - render 8-bit and two-byte glyphs into the framebuffer;
 - verify metrics and damaged pixels against expected fixture data;
-- request an unknown name and retain `BadName` behavior;
+- request an unknown name without invoking the provider and retain `BadName`;
+- supply malformed provider bytes and retain ordinary X11 failure semantics;
 - repeat under native CMake, Emscripten/Node, and Autotools builds.
 
 ## Implementation slices
@@ -437,25 +577,32 @@ Through a descriptor-free client:
    with unit and fuzz tests.
 3. **PCF parser:** add a bounded memory reader and required PCF tables, then
    cross-check output against BDF fixtures.
-4. **Mutable catalog:** combine borrowed built-ins and owned parsed entries,
-   implement atomic aliases, freezing, and shutdown ordering.
-5. **Public API:** add registration types and calls, facade state enforcement,
-   detailed diagnostics, and explicit WASM exports.
-6. **Host integration:** teach the Kitty host to optionally load a directory or
-   explicit font files before accepting socket clients.
-7. **End-to-end validation:** exercise listing, opening, rendering, aliases,
-   shutdown, native builds, and WASM.
+4. **Manifest and lazy catalog:** combine borrowed built-ins with copied host
+   source descriptors, atomic aliases, freeze semantics, source state, decoded
+   caching, and shutdown ordering.
+5. **Public provider API:** add provider and source types, facade state
+   enforcement, callback leases, diagnostics, reentrancy guards, and explicit
+   WASM exports.
+6. **Host integration:** teach the Kitty host to discover and preload a font
+   manifest and serve ready uncompressed bytes by source identifier.
+7. **End-to-end validation:** exercise listing without acquisition, lazy open,
+   rendering, caching, aliases, failure, shutdown, native builds, and WASM.
 
 ## Completion criteria
 
 Host-provided font loading is complete when:
 
-- native and WASM hosts can register uncompressed BDF and PCF bytes without a
-  filesystem dependency in the core;
-- input bytes and names are copied synchronously and have documented lifetime;
-- registered names and aliases participate in normal X11 listing and opening;
+- native and WASM hosts can advertise BDF and PCF sources without giving the
+  core filesystem access;
+- manifest names and aliases are copied before clients and remain immutable;
+- `ListFonts` uses the frozen manifest without acquiring source bytes;
+- metrics or glyph requests synchronously acquire each source at most once;
+- every successful acquisition has one matching release and TinyX retains no
+  provider byte pointer afterward;
 - registered glyphs render through the existing DIX, GC, MI, and FB path;
-- malformed files return bounded diagnostics without poisoning the server;
-- the catalog is immutable once clients exist and tears down after open fonts;
-- built-in `fixed` and `cursor` remain available with no host fonts;
+- malformed files produce bounded host diagnostics and ordinary X11 errors
+  without poisoning the server;
+- provider callbacks are prompt, non-reentrant, and detached safely at teardown;
+- decoded catalog storage outlives all open `FontRec` leases;
+- built-in `fixed` and `cursor` remain available with no provider;
 - native libXfont behavior remains unchanged in its existing build mode.
