@@ -33,7 +33,12 @@ Options and corresponding environment variables are:
 --log PATH         TINYX_KITTY_LOG
 ```
 
-Press Control-C to exit. Enhanced terminal keyboard events are translated to
-the fixed US Xorg keymap documented by `tinyx.h`. Explicit modifier-key events
-are preserved; when a terminal reports modifiers only as flags, the host emits
-ordered synthetic modifier presses and releases around the affected X keys.
+Press Control-C to exit. The X screen is sized to the terminal pixel area
+available above the log when the host starts. API v1 does not support live
+screen resizing, so later terminal resizes preserve and fit that initial screen
+rather than changing its X11 geometry.
+
+Enhanced terminal keyboard events are translated to the fixed US Xorg keymap
+documented by `tinyx.h`. Explicit modifier-key events are preserved; when a
+terminal reports modifiers only as flags, the host emits ordered synthetic
+modifier presses and releases around the affected X keys.

@@ -28,8 +28,8 @@ use input::KeyboardState;
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
 const LOG_INTERVAL: Duration = Duration::from_millis(100);
-const SCREEN_WIDTH: u32 = 640;
-const SCREEN_HEIGHT: u32 = 480;
+const FALLBACK_CELL_WIDTH: u32 = 8;
+const FALLBACK_CELL_HEIGHT: u32 = 16;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Viewport {
@@ -57,6 +57,31 @@ impl Viewport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ScreenGeometry {
+    width: u32,
+    height: u32,
+}
+
+impl ScreenGeometry {
+    fn for_viewport(viewport: Viewport) -> Self {
+        let total_rows = u32::from(viewport.image_rows + viewport.log_rows);
+        if let Ok(size) = terminal::window_size() {
+            if size.width != 0 && size.height != 0 {
+                return Self {
+                    width: u32::from(size.width),
+                    height: (u32::from(size.height) * u32::from(viewport.image_rows) / total_rows)
+                        .max(1),
+                };
+            }
+        }
+        Self {
+            width: u32::from(viewport.columns) * FALLBACK_CELL_WIDTH,
+            height: u32::from(viewport.image_rows) * FALLBACK_CELL_HEIGHT,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ImagePlacement {
     column: u16,
     row: u16,
@@ -66,15 +91,15 @@ struct ImagePlacement {
 }
 
 impl ImagePlacement {
-    fn current(viewport: Viewport) -> Self {
+    fn current(viewport: Viewport, screen: ScreenGeometry) -> Self {
         let pixel_size = terminal::window_size().ok().and_then(|size| {
             (size.width != 0 && size.height != 0)
                 .then_some((u32::from(size.width), u32::from(size.height)))
         });
-        Self::new(viewport, pixel_size)
+        Self::new(viewport, pixel_size, screen)
     }
 
-    fn new(viewport: Viewport, pixel_size: Option<(u32, u32)>) -> Self {
+    fn new(viewport: Viewport, pixel_size: Option<(u32, u32)>, screen: ScreenGeometry) -> Self {
         // If pixel dimensions are unavailable, assume the conventional 1:2
         // terminal-cell aspect ratio. Kitty normally supplies exact pixels.
         let (window_width, window_height) = pixel_size.unwrap_or((
@@ -86,7 +111,7 @@ impl ImagePlacement {
         let cell_height = window_height as f64 / f64::from(total_rows);
         let available_width = cell_width * f64::from(viewport.columns);
         let available_height = cell_height * f64::from(viewport.image_rows);
-        let source_aspect = f64::from(SCREEN_WIDTH) / f64::from(SCREEN_HEIGHT);
+        let source_aspect = f64::from(screen.width) / f64::from(screen.height);
 
         let (columns, rows) = if available_width / available_height > source_aspect {
             let rows = viewport.image_rows;
@@ -409,7 +434,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         options.socket.display()
     ));
 
-    let server = Server::create(SCREEN_WIDTH, SCREEN_HEIGHT)?;
+    let screen = ScreenGeometry::for_viewport(Viewport::current());
+    logger.write(format_args!(
+        "configured {}x{} X screen for terminal pixel area",
+        screen.width, screen.height
+    ));
+    let server = Server::create(screen.width, screen.height)?;
     let terminal = TerminalGuard::enter()?;
     let mut stdout = io::stdout();
     let mut clients = HashMap::<u64, Connection>::new();
@@ -557,7 +587,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Event::Mouse(mouse) => {
                     let Some((x, y)) =
-                        pointer_position(mouse.column, mouse.row, Viewport::current())
+                        pointer_position(mouse.column, mouse.row, Viewport::current(), screen)
                     else {
                         continue;
                     };
@@ -614,7 +644,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 present_kitty_png(
                     &mut stdout,
                     &png,
-                    ImagePlacement::current(viewport),
+                    ImagePlacement::current(viewport, screen),
                     next_image_id,
                     current_image_id,
                 )?;
@@ -622,7 +652,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 terminal.image_id.set(current_image_id);
                 next_image_id = next_image_id.checked_add(1).unwrap_or(1);
                 logger.write(format_args!(
-                    "presented {SCREEN_WIDTH}x{SCREEN_HEIGHT} frame as {} PNG bytes",
+                    "presented {}x{} frame as {} PNG bytes",
+                    screen.width,
+                    screen.height,
                     png.len()
                 ));
                 frame_dirty = false;
@@ -693,8 +725,13 @@ fn delete_kitty_image(writer: &mut impl Write, image_id: u32) -> io::Result<()> 
     writer.flush()
 }
 
-fn pointer_position(column: u16, row: u16, viewport: Viewport) -> Option<(i32, i32)> {
-    let placement = ImagePlacement::current(viewport);
+fn pointer_position(
+    column: u16,
+    row: u16,
+    viewport: Viewport,
+    screen: ScreenGeometry,
+) -> Option<(i32, i32)> {
+    let placement = ImagePlacement::current(viewport, screen);
     let (x, y) = if let Some((window_width, window_height)) = placement.pixel_size {
         let total_rows = u32::from(viewport.image_rows + viewport.log_rows);
         let left = u32::from(placement.column) * window_width / u32::from(viewport.columns);
@@ -707,8 +744,8 @@ fn pointer_position(column: u16, row: u16, viewport: Viewport) -> Option<(i32, i
             return None;
         }
         (
-            (column - left) * SCREEN_WIDTH / width.max(1),
-            (row - top) * SCREEN_HEIGHT / height.max(1),
+            (column - left) * screen.width / width.max(1),
+            (row - top) * screen.height / height.max(1),
         )
     } else {
         if column < placement.column
@@ -719,13 +756,13 @@ fn pointer_position(column: u16, row: u16, viewport: Viewport) -> Option<(i32, i
             return None;
         }
         (
-            u32::from(column - placement.column) * SCREEN_WIDTH / u32::from(placement.columns),
-            u32::from(row - placement.row) * SCREEN_HEIGHT / u32::from(placement.rows),
+            u32::from(column - placement.column) * screen.width / u32::from(placement.columns),
+            u32::from(row - placement.row) * screen.height / u32::from(placement.rows),
         )
     };
     Some((
-        x.min(SCREEN_WIDTH - 1) as i32,
-        y.min(SCREEN_HEIGHT - 1) as i32,
+        x.min(screen.width - 1) as i32,
+        y.min(screen.height - 1) as i32,
     ))
 }
 
@@ -785,7 +822,14 @@ mod tests {
         present_kitty_png(
             &mut output,
             &vec![0xa5; 4096],
-            ImagePlacement::new(Viewport::new(80, 24), Some((800, 480))),
+            ImagePlacement::new(
+                Viewport::new(80, 24),
+                Some((800, 480)),
+                ScreenGeometry {
+                    width: 640,
+                    height: 480,
+                },
+            ),
             8,
             Some(7),
         )
