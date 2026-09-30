@@ -56,6 +56,61 @@ impl Viewport {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImagePlacement {
+    column: u16,
+    row: u16,
+    columns: u16,
+    rows: u16,
+    pixel_size: Option<(u32, u32)>,
+}
+
+impl ImagePlacement {
+    fn current(viewport: Viewport) -> Self {
+        let pixel_size = terminal::window_size().ok().and_then(|size| {
+            (size.width != 0 && size.height != 0)
+                .then_some((u32::from(size.width), u32::from(size.height)))
+        });
+        Self::new(viewport, pixel_size)
+    }
+
+    fn new(viewport: Viewport, pixel_size: Option<(u32, u32)>) -> Self {
+        // If pixel dimensions are unavailable, assume the conventional 1:2
+        // terminal-cell aspect ratio. Kitty normally supplies exact pixels.
+        let (window_width, window_height) = pixel_size.unwrap_or((
+            u32::from(viewport.columns),
+            u32::from(viewport.image_rows + viewport.log_rows) * 2,
+        ));
+        let total_rows = u32::from(viewport.image_rows + viewport.log_rows);
+        let cell_width = window_width as f64 / f64::from(viewport.columns);
+        let cell_height = window_height as f64 / f64::from(total_rows);
+        let available_width = cell_width * f64::from(viewport.columns);
+        let available_height = cell_height * f64::from(viewport.image_rows);
+        let source_aspect = f64::from(SCREEN_WIDTH) / f64::from(SCREEN_HEIGHT);
+
+        let (columns, rows) = if available_width / available_height > source_aspect {
+            let rows = viewport.image_rows;
+            let columns = (source_aspect * f64::from(rows) * cell_height / cell_width)
+                .round()
+                .clamp(1.0, f64::from(viewport.columns)) as u16;
+            (columns, rows)
+        } else {
+            let columns = viewport.columns;
+            let rows = (f64::from(columns) * cell_width / source_aspect / cell_height)
+                .round()
+                .clamp(1.0, f64::from(viewport.image_rows)) as u16;
+            (columns, rows)
+        };
+        Self {
+            column: (viewport.columns - columns) / 2,
+            row: (viewport.image_rows - rows) / 2,
+            columns,
+            rows,
+            pixel_size,
+        }
+    }
+}
+
 struct TerminalGuard {
     keyboard_enhancement: bool,
     image_id: Cell<Option<u32>>,
@@ -555,10 +610,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             frame_dirty |= server.take_damage()?;
             if frame_dirty {
                 let png = server.encode_png()?;
+                let viewport = Viewport::current();
                 present_kitty_png(
                     &mut stdout,
                     &png,
-                    Viewport::current(),
+                    ImagePlacement::current(viewport),
                     next_image_id,
                     current_image_id,
                 )?;
@@ -597,11 +653,16 @@ fn apply_key_event(
 fn present_kitty_png(
     writer: &mut impl Write,
     png: &[u8],
-    viewport: Viewport,
+    placement: ImagePlacement,
     image_id: u32,
     previous_image_id: Option<u32>,
 ) -> io::Result<()> {
-    writer.write_all(b"\x1b[s\x1b[H")?;
+    write!(
+        writer,
+        "\x1b[s\x1b[{};{}H",
+        placement.row + 1,
+        placement.column + 1
+    )?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(png);
     for (index, chunk) in encoded.as_bytes().chunks(4096).enumerate() {
         let more = usize::from((index + 1) * 4096 < encoded.len());
@@ -609,7 +670,7 @@ fn present_kitty_png(
             write!(
                 writer,
                 "\x1b_Ga=T,f=100,t=d,i={image_id},p=1,q=2,C=1,c={},r={},m={more};",
-                viewport.columns, viewport.image_rows
+                placement.columns, placement.rows
             )?;
         } else {
             write!(writer, "\x1b_Gm={more};")?;
@@ -633,24 +694,33 @@ fn delete_kitty_image(writer: &mut impl Write, image_id: u32) -> io::Result<()> 
 }
 
 fn pointer_position(column: u16, row: u16, viewport: Viewport) -> Option<(i32, i32)> {
-    let size = terminal::window_size().ok();
-    let (x, y) = if let Some(size) = size.filter(|size| size.width != 0 && size.height != 0) {
-        let image_height =
-            u32::from(size.height) * u32::from(viewport.image_rows) / u32::from(size.rows.max(1));
-        if u32::from(row) >= image_height.max(1) {
+    let placement = ImagePlacement::current(viewport);
+    let (x, y) = if let Some((window_width, window_height)) = placement.pixel_size {
+        let total_rows = u32::from(viewport.image_rows + viewport.log_rows);
+        let left = u32::from(placement.column) * window_width / u32::from(viewport.columns);
+        let top = u32::from(placement.row) * window_height / total_rows;
+        let width = u32::from(placement.columns) * window_width / u32::from(viewport.columns);
+        let height = u32::from(placement.rows) * window_height / total_rows;
+        let column = u32::from(column);
+        let row = u32::from(row);
+        if column < left || column >= left + width || row < top || row >= top + height {
             return None;
         }
         (
-            u32::from(column) * SCREEN_WIDTH / u32::from(size.width),
-            u32::from(row) * SCREEN_HEIGHT / image_height.max(1),
+            (column - left) * SCREEN_WIDTH / width.max(1),
+            (row - top) * SCREEN_HEIGHT / height.max(1),
         )
     } else {
-        if row >= viewport.image_rows {
+        if column < placement.column
+            || column >= placement.column + placement.columns
+            || row < placement.row
+            || row >= placement.row + placement.rows
+        {
             return None;
         }
         (
-            u32::from(column) * SCREEN_WIDTH / u32::from(viewport.columns),
-            u32::from(row) * SCREEN_HEIGHT / u32::from(viewport.image_rows),
+            u32::from(column - placement.column) * SCREEN_WIDTH / u32::from(placement.columns),
+            u32::from(row - placement.row) * SCREEN_HEIGHT / u32::from(placement.rows),
         )
     };
     Some((
@@ -715,14 +785,14 @@ mod tests {
         present_kitty_png(
             &mut output,
             &vec![0xa5; 4096],
-            Viewport::new(80, 24),
+            ImagePlacement::new(Viewport::new(80, 24), Some((800, 480))),
             8,
             Some(7),
         )
         .unwrap();
         let text = String::from_utf8(output).unwrap();
-        assert!(text.starts_with("\u{1b}[s\u{1b}[H\u{1b}_Ga=T"));
-        assert!(text.contains("a=T,f=100,t=d,i=8,p=1,q=2,C=1,c=80,r=18,m=1;"));
+        assert!(text.starts_with("\u{1b}[s\u{1b}[1;17H\u{1b}_Ga=T"));
+        assert!(text.contains("a=T,f=100,t=d,i=8,p=1,q=2,C=1,c=48,r=18,m=1;"));
         assert!(text.contains("\u{1b}_Gm=0;"));
         let deletion = text.find("a=d,d=I,i=7,q=2").unwrap();
         let final_chunk = text.find("\u{1b}_Gm=0;").unwrap();
