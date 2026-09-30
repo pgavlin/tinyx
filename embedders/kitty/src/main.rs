@@ -3,6 +3,7 @@
 mod ffi;
 mod input;
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -57,6 +58,7 @@ impl Viewport {
 
 struct TerminalGuard {
     keyboard_enhancement: bool,
+    image_id: Cell<Option<u32>>,
 }
 
 impl TerminalGuard {
@@ -87,6 +89,7 @@ impl TerminalGuard {
         }
         Ok(Self {
             keyboard_enhancement,
+            image_id: Cell::new(None),
         })
     }
 }
@@ -94,7 +97,9 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let mut stdout = io::stdout();
-        let _ = delete_kitty_image(&mut stdout);
+        if let Some(image_id) = self.image_id.get() {
+            let _ = delete_kitty_image(&mut stdout, image_id);
+        }
         let _ = stdout.write_all(b"\x1b[?1016l");
         if self.keyboard_enhancement {
             let _ = execute!(stdout, PopKeyboardEnhancementFlags);
@@ -357,6 +362,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut keyboard = KeyboardState::default();
     let mut pressed_buttons = HashSet::new();
     let mut frame_dirty = true;
+    let mut current_image_id = None;
+    let mut next_image_id = 1_u32;
     let mut next_frame = Instant::now();
     let mut next_log = Instant::now();
 
@@ -548,7 +555,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             frame_dirty |= server.take_damage()?;
             if frame_dirty {
                 let png = server.encode_png()?;
-                present_kitty_png(&mut stdout, &png, Viewport::current())?;
+                present_kitty_png(
+                    &mut stdout,
+                    &png,
+                    Viewport::current(),
+                    next_image_id,
+                    current_image_id,
+                )?;
+                current_image_id = Some(next_image_id);
+                terminal.image_id.set(current_image_id);
+                next_image_id = next_image_id.checked_add(1).unwrap_or(1);
                 logger.write(format_args!(
                     "presented {SCREEN_WIDTH}x{SCREEN_HEIGHT} frame as {} PNG bytes",
                     png.len()
@@ -578,16 +594,21 @@ fn apply_key_event(
     Ok(())
 }
 
-fn present_kitty_png(writer: &mut impl Write, png: &[u8], viewport: Viewport) -> io::Result<()> {
+fn present_kitty_png(
+    writer: &mut impl Write,
+    png: &[u8],
+    viewport: Viewport,
+    image_id: u32,
+    previous_image_id: Option<u32>,
+) -> io::Result<()> {
     writer.write_all(b"\x1b[s\x1b[H")?;
-    delete_kitty_image(writer)?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(png);
     for (index, chunk) in encoded.as_bytes().chunks(4096).enumerate() {
         let more = usize::from((index + 1) * 4096 < encoded.len());
         if index == 0 {
             write!(
                 writer,
-                "\x1b_Ga=T,f=100,t=d,i=1,q=2,C=1,c={},r={},m={more};",
+                "\x1b_Ga=T,f=100,t=d,i={image_id},p=1,q=2,C=1,c={},r={},m={more};",
                 viewport.columns, viewport.image_rows
             )?;
         } else {
@@ -596,12 +617,18 @@ fn present_kitty_png(writer: &mut impl Write, png: &[u8], viewport: Viewport) ->
         writer.write_all(chunk)?;
         writer.write_all(b"\x1b\\")?;
     }
+    // Kitty does not display a chunked transmission until the final chunk has
+    // been received and validated. Keep the previous placement visible until
+    // that point, then remove it without exposing a blank frame.
+    if let Some(previous_image_id) = previous_image_id {
+        delete_kitty_image(writer, previous_image_id)?;
+    }
     writer.write_all(b"\x1b[u")?;
     writer.flush()
 }
 
-fn delete_kitty_image(writer: &mut impl Write) -> io::Result<()> {
-    writer.write_all(b"\x1b_Ga=d,d=I,i=1,q=2\x1b\\")?;
+fn delete_kitty_image(writer: &mut impl Write, image_id: u32) -> io::Result<()> {
+    write!(writer, "\x1b_Ga=d,d=I,i={image_id},q=2\x1b\\")?;
     writer.flush()
 }
 
@@ -685,11 +712,21 @@ mod tests {
     #[test]
     fn kitty_png_is_chunked_and_terminated() {
         let mut output = Vec::new();
-        present_kitty_png(&mut output, &vec![0xa5; 4096], Viewport::new(80, 24)).unwrap();
+        present_kitty_png(
+            &mut output,
+            &vec![0xa5; 4096],
+            Viewport::new(80, 24),
+            8,
+            Some(7),
+        )
+        .unwrap();
         let text = String::from_utf8(output).unwrap();
-        assert!(text.starts_with("\u{1b}[s\u{1b}[H\u{1b}_Ga=d,d=I,i=1,q=2"));
-        assert!(text.contains("a=T,f=100,t=d,i=1,q=2,C=1,c=80,r=18,m=1;"));
+        assert!(text.starts_with("\u{1b}[s\u{1b}[H\u{1b}_Ga=T"));
+        assert!(text.contains("a=T,f=100,t=d,i=8,p=1,q=2,C=1,c=80,r=18,m=1;"));
         assert!(text.contains("\u{1b}_Gm=0;"));
+        let deletion = text.find("a=d,d=I,i=7,q=2").unwrap();
+        let final_chunk = text.find("\u{1b}_Gm=0;").unwrap();
+        assert!(deletion > final_chunk);
         assert!(text.ends_with("\u{1b}[u"));
     }
 }
