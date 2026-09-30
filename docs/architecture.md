@@ -938,9 +938,9 @@ new available pixel area. Terminal mouse events become absolute pointer and
 button injection. Enhanced keyboard events use explicit Xorg-compatible
 keycodes; modifier flags are converted into ordered synthetic key transitions
 when the terminal does not report physical modifier keys separately. The
-planned stock-dwm validation of this host, core window-manager behavior, Xft,
-grabs, and resizing is described in
-[Running dwm on TinyX](dwm-integration-plan.md).
+planned stock-st and stock-dwm validation of this host, Xft/Render, selections,
+core window-manager behavior, grabs, and resizing is described in
+[Running st and dwm on TinyX](dwm-integration-plan.md).
 
 ### Sidecar build products
 

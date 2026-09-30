@@ -1,22 +1,37 @@
-# Running dwm on TinyX
+# Running st and dwm on TinyX
 
 ## Status
 
-This document plans native dwm integration through the Unix-domain X11 socket
-provided by the Kitty reference host. The first milestone is an unmodified
-stock dwm process managing ordinary native X11 clients on a one-screen TinyX
-display.
+This document plans native st and dwm integration through the Unix-domain X11
+socket provided by the Kitty reference host. The first milestone is an
+unmodified stock st process running directly on a one-screen TinyX display.
+The second is an unmodified stock dwm process managing st and other ordinary
+native X11 clients on that display.
 
-No dwm-specific TinyX API or server extension is expected. The purpose of the
-work is to validate the existing core protocol, Render, input, resize, and
-socket-host paths together and fix general X11 compatibility defects exposed
-by dwm.
+No st- or dwm-specific TinyX API or server extension is expected. The purpose
+of the work is to validate the existing core protocol, Render, input,
+selection, resize, and socket-host paths together and fix general X11
+compatibility defects exposed by real applications.
 
 Compiling dwm, Xlib, and application processes into WebAssembly is a separate
 project. It would require a client-side Xlib transport and replacements for
 dwm's native `fork()` and `exec()` behavior; it is not part of this plan.
 
-## Why dwm should fit
+## Why st and dwm should fit
+
+Stock st uses:
+
+- core Xlib window, event, property, selection, cursor, and drawing operations;
+- Xft and fontconfig for client-side font selection and rasterization;
+- the Render extension used by Xft to upload and composite glyphs;
+- X input methods when available, with a fallback when no input method is
+  configured;
+- a pseudoterminal and ordinary host process facilities that remain entirely
+  inside the native client process.
+
+st does not require a window manager for initial bring-up. Running it directly
+therefore isolates application rendering, input, selection, and resize behavior
+from window-manager redirection and policy.
 
 Stock dwm 6.8 uses:
 
@@ -32,14 +47,17 @@ complete cursor bitmap font, multiple memory clients, a depth-24 memory screen,
 input injection, runtime resizing, and the Kitty socket bridge.
 
 The server-side BDF/PCF provider is not required. Xft opens fonts using
-fontconfig and FreeType in the dwm process, rasterizes glyphs there, and sends
-glyph images to TinyX through Render.
+fontconfig and FreeType in the st or dwm process, rasterizes glyphs there, and
+sends glyph images to TinyX through Render. This makes st a direct validation
+that modern client-side fonts work independently of the server's core bitmap
+font catalog.
 
 ## Initial scope
 
 The initial supported configuration is:
 
-- native dwm and native X11 applications;
+- unmodified native st, first without and then with dwm;
+- native dwm and other native X11 applications;
 - the Kitty embedder as the TinyX host and presenter;
 - one TinyX screen and one dwm monitor;
 - a local trusted Unix-domain display socket;
@@ -59,17 +77,20 @@ The following are deferred:
 
 ## Bring-up procedure
 
-### 1. Build dwm for the host
+### 1. Build st and dwm for the host
 
-Build stock dwm against the host's Xlib, Xft, fontconfig, and FreeType. Adjust
-its `config.mk` include and library paths as needed. For the first run, disable
+Build stock st against the host's Xlib, Xft, fontconfig, and FreeType. Adjust
+its `config.mk` include and library paths as needed, and ensure its configured
+font is available through the host's fontconfig installation. st's shell and
+pseudoterminal are native client facilities and require no TinyX integration.
+
+Build stock dwm against the same host libraries. For the first run, disable
 Xinerama by removing `-DXINERAMA` and `-lXinerama`; TinyX currently exposes one
 screen and does not initialize its Xinerama compatibility extension.
 
-Stock dwm's default launcher expects `st` and `dmenu_run`. These are not server
-requirements. Either edit `config.h` to name installed programs or launch test
-clients from another shell. An externally launched xterm is sufficient for
-initial window-management testing.
+Stock dwm's default launcher expects `st` and `dmenu_run`. Installing the test
+st binary at the configured path makes the default terminal binding useful;
+alternatively edit `config.h` or launch clients from another shell.
 
 ### 2. Start the display host
 
@@ -83,7 +104,21 @@ The host creates `/tmp/.X11-unix/X100`, maps each accepted socket connection to
 a TinyX logical client, continuously steps the server, injects terminal input,
 and presents framebuffer damage.
 
-### 3. Start dwm
+### 3. Run st directly
+
+Before introducing a window manager, run:
+
+```sh
+DISPLAY=:100 ./st
+```
+
+Validate terminal output, typing, pointer selection, clipboard transfer, focus,
+and terminal-window resizing. This isolates Xft/Render, keyboard lookup, XIM
+fallback, selections, and ordinary configure/expose handling. Exit st before
+the initial dwm run so that window-manager startup behavior can be tested from
+a clean root window.
+
+### 4. Start dwm
 
 In another shell:
 
@@ -95,23 +130,46 @@ dwm should successfully select `SubstructureRedirectMask` on the root window,
 create its supporting-WM window and bar, install passive input grabs, and enter
 its `XNextEvent()` loop.
 
-### 4. Start representative clients
+### 5. Start representative clients
 
 For example:
 
 ```sh
+DISPLAY=:100 ./st
 DISPLAY=:100 /opt/X11/bin/xterm
 DISPLAY=:100 /opt/X11/bin/xclock
 ```
 
 Starting dwm before ordinary clients is preferable, although its startup scan
-should also adopt suitable pre-existing top-level windows.
+should also adopt suitable pre-existing top-level windows. Once direct st and
+dwm bring-up pass independently, st under dwm is the primary compact desktop
+integration test.
 
 ## Validation slices
 
-### Slice 1: Xft and Render
+### Slice 1: st application behavior
 
-The dwm bar is the first high-value Render integration test. Validate:
+st is the first high-value Render and interactive-client integration test.
+Validate:
+
+- Xft/fontconfig font matching succeeds entirely in the client process;
+- Render format discovery, glyph-set creation, glyph upload, and composition;
+- antialiased ASCII and UTF-8 text reaches the framebuffer and produces damage;
+- typing and modifier transitions produce the expected terminal bytes;
+- XIM initialization succeeds or falls back cleanly when no input method is
+  available;
+- primary selection ownership, `SelectionRequest`, `SelectionNotify`, and
+  property transfer support copy and paste;
+- pointer selection, cursor changes, focus events, and expose handling work;
+- configure events resize the pseudoterminal and redraw the backing pixmap.
+
+Completion signal: an interactive shell in stock st renders continuously,
+accepts keyboard and mouse input, copies and pastes text, and survives repeated
+resizes without server-side font-path changes.
+
+### Slice 2: dwm Xft and Render
+
+The dwm bar is the next high-value Render integration test. Validate:
 
 - `XRenderQueryExtension()` and format discovery;
 - matching the root visual to a Render picture format;
@@ -129,7 +187,7 @@ damage assertions in a descriptor-free integration test.
 Completion signal: the tag labels, layout symbol, window title, and status text
 appear correctly in the dwm bar without server-side font-path changes.
 
-### Slice 2: window-manager ownership and redirection
+### Slice 3: window-manager ownership and redirection
 
 Validate the core behavior on which every non-reparenting window manager
 relies:
@@ -149,7 +207,7 @@ clients, independently of the Kitty host.
 Completion signal: newly launched xterm windows are tiled and bordered by dwm
 rather than appearing unmanaged.
 
-### Slice 3: properties, focus, and client messages
+### Slice 4: properties, focus, and client messages
 
 Validate the ICCCM and EWMH mechanisms used by stock dwm:
 
@@ -165,7 +223,7 @@ Completion signal: focus follows dwm policy, titles and status changes update,
 fullscreen toggling works, and client close requests follow `WM_DELETE_WINDOW`
 when supported.
 
-### Slice 4: keyboard and pointer grabs
+### Slice 5: keyboard and pointer grabs
 
 Validate both the core server and Kitty input adapter:
 
@@ -186,7 +244,7 @@ Completion signal: keyboard-driven tagging/layout operations, bar clicks,
 window focus, and pointer move/resize all work without stuck modifiers or
 buttons.
 
-### Slice 5: cursors
+### Slice 6: cursors
 
 Validate dwm's calls to `XCreateFontCursor()` for normal, move, and resize
 cursors. TinyX's embedded cursor font should satisfy these without filesystem
@@ -196,7 +254,7 @@ presentation and damage.
 Completion signal: cursor creation produces no X errors and the expected cursor
 changes are visible over the root, client, and drag regions.
 
-### Slice 6: runtime resize
+### Slice 7: runtime resize
 
 The Kitty host resizes TinyX when terminal pixel capacity changes. dwm does not
 need RandR for its basic one-monitor response; it handles root
@@ -234,17 +292,22 @@ report:
 
 1. **Render smoke test:** upload and composite an antialiased glyph, then check
    framebuffer pixels and damage.
-2. **WM ownership test:** use two clients to verify root redirect ownership and
+2. **Selection test:** exercise primary selection ownership and conversion
+   between two descriptor-free clients.
+3. **WM ownership test:** use two clients to verify root redirect ownership and
    `BadAccess`.
-3. **Map/configure redirection test:** verify `MapRequest` and
+4. **Map/configure redirection test:** verify `MapRequest` and
    `ConfigureRequest` wire events.
-4. **Property/focus test:** exercise the subset of ICCCM/EWMH behavior dwm uses.
-5. **Grab/input test:** install passive grabs, inject host input, and verify
+5. **Property/focus test:** exercise the subset of ICCCM/EWMH behavior dwm and
+   st use.
+6. **Grab/input test:** install passive grabs, inject host input, and verify
    event routing and modifier state.
-6. **Resize test:** keep a WM client connected across repeated screen changes
-   and verify root notifications and final geometry.
-7. **Manual dwm test:** run stock dwm plus xterm and xclock through the Kitty
-   socket and record the tested host versions and configuration.
+7. **Resize test:** keep application and WM clients connected across repeated
+   screen changes and verify notifications and final geometry.
+8. **Manual st test:** run stock st directly through the Kitty socket and record
+   rendering, typing, selection, clipboard, focus, and resize results.
+9. **Manual desktop test:** run stock dwm with st, xterm, and xclock through the
+   Kitty socket and record the tested host versions and configuration.
 
 Protocol tests should run in native CMake, Emscripten/Node where applicable,
 and the Autotools embedded-font build. The actual dwm process and Kitty
@@ -254,6 +317,10 @@ presentation test is native-only.
 
 | Symptom | Most likely boundary |
 |---|---|
+| st opens but text is absent or corrupt | Xft/Render formats, glyph upload, composition, or framebuffer damage |
+| st cannot type non-ASCII text | XIM initialization, keyboard mapping, or keysym translation |
+| st selection works but paste does not | selection ownership, conversion events, or property transfer |
+| st does not track size changes | configure delivery, size hints, or pseudoterminal resize handling |
 | dwm exits with "another window manager is already running" | root event-mask ownership or unexpected existing WM |
 | dwm starts but no bar text appears | Xft/Render formats, glyph upload, or composition |
 | bar appears but new windows are unmanaged | substructure redirect or `MapRequest` delivery |
@@ -266,12 +333,15 @@ presentation test is native-only.
 
 ## Completion criteria
 
-Initial dwm support is complete when:
+Initial st and dwm support is complete when:
 
+- stock native st runs directly on the Kitty-hosted TinyX display;
+- st renders Xft text, accepts input, supports selection and paste, and tracks
+  repeated resizes without server-side font configuration;
 - stock native dwm starts on the Kitty-hosted TinyX display;
 - dwm owns root substructure redirection and a second WM is rejected;
 - the Xft-rendered bar is legible without host-provided server fonts;
-- xterm and xclock windows are discovered, tiled, focused, restacked, and
+- st, xterm, and xclock windows are discovered, tiled, focused, restacked, and
   closed correctly;
 - default Alt keyboard bindings and pointer interactions work;
 - dwm cursors are visible and update during pointer operations;
