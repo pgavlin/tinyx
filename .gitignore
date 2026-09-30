@@ -12,6 +12,7 @@ Makefile.in
 /build/
 /build-cmake/
 /build-wasm*/
+/embedders/kitty/target/
 aclocal.m4
 autom4te.cache
 ar-lib

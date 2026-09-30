@@ -57,6 +57,23 @@ cmake --install build/native --prefix /desired/prefix
 
 Installed CMake consumers can use the exported `TinyX::tinyx` target.
 
+## Kitty terminal host
+
+`embedders/kitty` is a Rust reference host for the public C API. Its Cargo
+build invokes the sidecar CMake build, listens for ordinary X11 clients on a
+Unix-domain socket, presents framebuffer damage with the Kitty graphics
+protocol, and injects terminal keyboard and mouse input:
+
+```sh
+cargo run --manifest-path embedders/kitty/Cargo.toml --release
+# In another shell:
+DISPLAY=:99 xclock
+```
+
+The default display is `:99`. See `embedders/kitty/README.md` for socket, log,
+and dependency configuration. This development host trusts clients admitted
+through its local socket.
+
 ## Emscripten build
 
 Use Emscripten's CMake toolchain rather than setting `CC=emcc` manually:

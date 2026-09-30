@@ -924,6 +924,14 @@ host supplies its own entry point without also pulling the native lifecycle
 driver. A configured custom host also skips Xtrans listener creation; native
 hosts retain it.
 
+`embedders/kitty/` is a complete Rust host over this facade. It adapts a
+nonblocking Unix-domain socket to descriptor-free TinyX clients, consumes
+Damage before encoding the read-only framebuffer as PNG, and presents it with
+the Kitty graphics protocol. Terminal mouse events become absolute pointer and
+button injection. Enhanced keyboard events use explicit Xorg-compatible
+keycodes; modifier flags are converted into ordered synthetic key transitions
+when the terminal does not report physical modifier keys separately.
+
 ### Sidecar build products
 
 The root `CMakeLists.txt` assembles explicit source manifests into
