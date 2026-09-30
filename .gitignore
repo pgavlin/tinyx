@@ -42,6 +42,8 @@ kdrive/fbdev/Xfbdev
 kdrive/memory/Xmemory
 kdrive/memory/tinyx-api-test
 kdrive/memory/tinyx-api-test.log
+kdrive/memory/tinyx-font-pattern-test
+kdrive/memory/tinyx-font-pattern-test.log
 kdrive/memory/tinyx-embed-example
 kdrive/vesa/Xvesa
 dix/embedded-font-data-test

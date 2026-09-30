@@ -155,6 +155,33 @@ catalogAcquire(const char *name, size_t length, TinyXDecodedFontLease *lease)
                                          lease);
 }
 
+static size_t catalogNameCount(void);
+static int catalogNameAt(size_t index, const char **name,
+                         const TinyXDecodedFont **font);
+
+/* OpenFont names are patterns. Resolve the first name in catalog order. */
+static int
+catalogAcquirePattern(const char *pattern, size_t patternLength,
+                      TinyXDecodedFontLease *lease)
+{
+    size_t i;
+
+    memset(lease, 0, sizeof(*lease));
+    for (i = 0; i < catalogNameCount(); i++) {
+        const TinyXDecodedFont *font;
+        const char *name;
+        int error = catalogNameAt(i, &name, &font);
+
+        (void) font;
+        if (error != Successful)
+            return error;
+        if (!patternMatches(pattern, patternLength, name))
+            continue;
+        return catalogAcquire(name, strlen(name), lease);
+    }
+    return BadFontName;
+}
+
 static size_t
 catalogNameCount(void)
 {
@@ -632,7 +659,9 @@ embeddedOpenFont(void *client, FontPathElementPtr fpe, Mask flags,
     (void) nonCachableFont;
     *font = NULL;
     *aliasName = NULL;
-    error = catalogAcquire(name, nameLength, &lease);
+    if (nameLength < 0 || nameLength > 255)
+        return BadFontName;
+    error = catalogAcquirePattern(name, (size_t) nameLength, &lease);
     if (error != Successful)
         return error;
     error = materializeFont(&lease, format, formatMask, font);

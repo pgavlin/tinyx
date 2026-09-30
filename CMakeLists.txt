@@ -272,6 +272,11 @@ if(TINYX_BUILD_TESTS)
     target_link_libraries(tinyx-big-endian-test PRIVATE tinyx)
     add_test(NAME tinyx-big-endian COMMAND tinyx-big-endian-test)
 
+    add_executable(tinyx-font-pattern-test
+        kdrive/memory/font-pattern-test.c)
+    target_link_libraries(tinyx-font-pattern-test PRIVATE tinyx)
+    add_test(NAME tinyx-font-pattern COMMAND tinyx-font-pattern-test)
+
     add_executable(tinyx-embedded-font-data-test
         dix/tests/embedded-font-data-test.c)
     target_include_directories(tinyx-embedded-font-data-test PRIVATE
