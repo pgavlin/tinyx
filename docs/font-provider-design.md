@@ -107,7 +107,7 @@ payloads.
 ## Public API
 
 The addition should increment `TINYX_API_VERSION_MINOR`. It adds new types and
-functions without extending existing structures.
+functions and appends one optional field to the size-versioned `tinyx_config`.
 
 An illustrative API is:
 
@@ -130,6 +130,12 @@ typedef struct tinyx_font_provider_ops {
     void (*release)(void *userdata, void *lease);
 } tinyx_font_provider_ops;
 
+typedef struct tinyx_font_provider_config {
+    uint32_t struct_size;
+    tinyx_font_provider_ops ops;
+    void *userdata;
+} tinyx_font_provider_config;
+
 typedef struct tinyx_font_source {
     uint32_t struct_size;
     uint64_t source_id;
@@ -143,14 +149,15 @@ typedef struct tinyx_font_source {
     size_t alias_count;
 } tinyx_font_source;
 
-void tinyx_font_provider_ops_init(tinyx_font_provider_ops *ops);
-void tinyx_font_source_init(tinyx_font_source *source);
+/* Appended to the existing size-versioned structure. */
+typedef struct tinyx_config {
+    /* Existing fields... */
+    const tinyx_font_provider_config *font_provider;
+} tinyx_config;
 
-tinyx_status tinyx_server_set_font_provider(
-    tinyx_server *server,
-    const tinyx_font_provider_ops *ops,
-    void *userdata,
-    tinyx_error *error);
+void tinyx_font_provider_ops_init(tinyx_font_provider_ops *ops);
+void tinyx_font_provider_config_init(tinyx_font_provider_config *config);
+void tinyx_font_source_init(tinyx_font_source *source);
 
 tinyx_status tinyx_server_add_font_source(
     tinyx_server *server,
@@ -169,25 +176,29 @@ are required.
 
 ### Configuration and freeze timing
 
-A server is created first so startup can use the guaranteed built-in `fixed`
-and `cursor` fonts. The host then installs one provider, registers every source
-manifest entry, and adds any aliases before opening its first `tinyx_client`.
+The provider is immutable server configuration, like the existing host
+callbacks. The host constructs provider state first and supplies it through
+`tinyx_config` when creating the server. Startup continues to use the
+guaranteed built-in `fixed` and `cursor` fonts, so provider callbacks are not
+invoked by `tinyx_server_create()`.
 
-The first successful `tinyx_client_open()` freezes the manifest. Subsequent
-provider replacement, source registration, or alias registration returns
-`TINYX_ERROR_INVALID_STATE`. This keeps `ListFonts` deterministic while
-requests are dispatched and avoids defining removal or replacement semantics
-for open font resources.
+After creation, the host registers every source manifest entry and adds any
+aliases before opening its first `tinyx_client`. The first successful
+`tinyx_client_open()` freezes the manifest. Subsequent source or alias
+registration returns `TINYX_ERROR_INVALID_STATE`. This keeps `ListFonts`
+deterministic while requests are dispatched and avoids defining removal or
+replacement semantics for open font resources.
 
 A typical host sequence is:
 
 ```c
-tinyx_server_create(&server_config, &server, &error);
+tinyx_font_provider_config_init(&font_provider);
+font_provider.ops.acquire = acquire_font;
+font_provider.ops.release = release_font;
+font_provider.userdata = host_fonts;
+server_config.font_provider = &font_provider;
 
-tinyx_font_provider_ops_init(&provider_ops);
-provider_ops.acquire = acquire_font;
-provider_ops.release = release_font;
-tinyx_server_set_font_provider(server, &provider_ops, host_fonts, &error);
+tinyx_server_create(&server_config, &server, &error);
 
 tinyx_font_source_init(&source);
 source.source_id = FONT_9X15;
@@ -204,13 +215,22 @@ tinyx_server_add_font_alias(server, "9x15", canonical_9x15_name, &error);
 tinyx_client_open(server, &client_config, &client);
 ```
 
-The provider may be omitted when only built-in fonts are needed. A provider
-must be installed before adding host sources. Only one provider may be
-installed in the initial API, and it cannot be replaced after any source is
-registered.
+The provider configuration may be omitted when only built-in fonts are needed.
+Adding a host source without a configured provider returns
+`TINYX_ERROR_INVALID_STATE`. There is exactly one immutable provider per server
+in the initial API; changing it requires creating a different server, which the
+singleton v1 lifetime model does not currently permit.
+
+`tinyx_config.font_provider`, its nested configuration, and the operation table
+are borrowed only for `tinyx_server_create()`. TinyX validates and copies the
+operations during creation. Only `userdata` remains borrowed for the server
+lifetime and must remain valid until `tinyx_server_destroy()` returns. Older
+callers whose `tinyx_config.struct_size` ends before the appended field behave
+as though `font_provider` were null.
 
 The API remains singleton, server-thread-only, non-thread-safe, and
-non-reentrant. Provider configuration must not occur from a TinyX callback.
+non-reentrant. Provider state must be initialized before server creation and
+must not call TinyX from its callbacks.
 
 ### Provider callback contract
 
@@ -315,14 +335,15 @@ them.
 
 ### Errors
 
-Configuration operations return:
+Server creation and manifest operations return:
 
-- `TINYX_ERROR_INVALID_ARGUMENT` for invalid structures, callbacks, names, or
-  identifiers;
-- `TINYX_ERROR_ALREADY_EXISTS` for a second provider, duplicate source
-  identifier, or colliding catalog name;
+- `TINYX_ERROR_INVALID_ARGUMENT` for an invalid provider configuration,
+  callbacks, structures, names, or identifiers;
+- `TINYX_ERROR_ALREADY_EXISTS` for a duplicate source identifier or colliding
+  catalog name;
 - `TINYX_ERROR_OUT_OF_MEMORY` for manifest allocation failure;
-- `TINYX_ERROR_INVALID_STATE` after manifest freeze or generation end;
+- `TINYX_ERROR_INVALID_STATE` when adding a source without a provider, after
+  manifest freeze, or after generation end;
 - `TINYX_ERROR_FATAL` only if an unrelated fatal server invariant unwinds the
   protected operation.
 
@@ -542,12 +563,15 @@ source provenance and deterministic regeneration instructions.
 
 ### Provider, catalog, and API tests
 
-- install one provider and reject replacement;
+- configure a provider during server creation and reject malformed operations;
+- create a server without a provider and retain built-in-only behavior;
+- reject a host source when no provider was configured;
+- verify provider configuration structures are borrowed only during creation;
 - register BDF and PCF source manifests before opening a client;
 - register canonical names and aliases and list them without acquisition;
 - reject duplicate source identifiers and collisions with built-ins;
 - verify failed multi-alias registration publishes nothing;
-- freeze provider and manifest changes on the first client open;
+- freeze manifest changes on the first client open;
 - verify `OpenFont` receives the expected opaque source identifier;
 - verify acquired bytes are released after success and every failure path;
 - verify source bytes may be freed immediately from `release`;
@@ -580,9 +604,9 @@ Through a descriptor-free client:
 4. **Manifest and lazy catalog:** combine borrowed built-ins with copied host
    source descriptors, atomic aliases, freeze semantics, source state, decoded
    caching, and shutdown ordering.
-5. **Public provider API:** add provider and source types, facade state
-   enforcement, callback leases, diagnostics, reentrancy guards, and explicit
-   WASM exports.
+5. **Public provider API:** extend initial server configuration with immutable
+   provider operations; add source types, facade state enforcement, callback
+   leases, diagnostics, reentrancy guards, and explicit WASM exports.
 6. **Host integration:** teach the Kitty host to discover and preload a font
    manifest and serve ready uncompressed bytes by source identifier.
 7. **End-to-end validation:** exercise listing without acquisition, lazy open,
