@@ -3,7 +3,7 @@
 ## Status
 
 This document records completed native st and dwm integration through the
-Unix-domain X11 socket provided by the Kitty reference host. The first
+Unix-domain X11 socket provided by the Kitty reference embedder. The first
 milestone was an unmodified stock st process running directly on a one-screen
 TinyX display. The second was an unmodified stock dwm process managing st and
 other ordinary native X11 clients on that display.
@@ -110,7 +110,7 @@ alternatively edit `config.h` or launch clients from another shell.
 
 ### 2. Start the display host
 
-Run the Kitty host on an unused display number:
+Run the Kitty embedder on an unused display number:
 
 ```sh
 cargo run --manifest-path embedders/kitty/Cargo.toml --release -- --display 100
@@ -231,7 +231,7 @@ relies:
 - destroying or disconnecting dwm releases root event ownership.
 
 These should become protocol-level regression tests with two descriptor-free
-clients, independently of the Kitty host.
+clients, independently of the Kitty embedder.
 
 Completion signal: newly launched xterm windows are tiled and bordered by dwm
 rather than appearing unmanaged.
@@ -285,7 +285,7 @@ changes are visible over the root, client, and drag regions.
 
 ### Slice 7: runtime resize
 
-The Kitty host resizes TinyX when terminal pixel capacity changes. dwm does not
+The Kitty embedder resizes TinyX when terminal pixel capacity changes. dwm does not
 need RandR for its basic one-monitor response; it handles root
 `ConfigureNotify` and recalculates monitor and bar geometry.
 

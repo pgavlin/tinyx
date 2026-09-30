@@ -16,12 +16,11 @@ include(GNUInstallDirs)
 include(TestBigEndian)
 
 option(TINYX_BUILD_TESTS "Build TinyX embedding tests" ${BUILD_TESTING})
-option(TINYX_BUILD_EXAMPLE "Build the native embedding example" ON)
+option(TINYX_BUILD_HEADLESS_EMBEDDER
+    "Build the native headless reference embedder" ON)
 option(TINYX_BUILD_WASM "Build the Emscripten module" ${EMSCRIPTEN})
 set(TINYX_XORGPROTO_INCLUDE_DIR "" CACHE PATH
     "Directory containing the X11 protocol headers (X11/Xproto.h)")
-set(TINYX_XTRANS_INCLUDE_DIR "" CACHE PATH
-    "Directory containing Xtrans headers (X11/Xtrans/Xtrans.h)")
 
 if(NOT TINYX_XORGPROTO_INCLUDE_DIR)
     find_path(TINYX_XORGPROTO_INCLUDE_DIR X11/Xproto.h)
@@ -30,19 +29,6 @@ if(NOT TINYX_XORGPROTO_INCLUDE_DIR)
     message(FATAL_ERROR
         "X.Org protocol headers were not found. Set TINYX_XORGPROTO_INCLUDE_DIR "
         "to the xorgproto include directory.")
-endif()
-
-# Xtrans is needed only for native socket support. Emscripten builds contain
-# descriptor-free clients and do not inspect native pkg-config metadata.
-if(NOT EMSCRIPTEN)
-    if(NOT TINYX_XTRANS_INCLUDE_DIR)
-        find_path(TINYX_XTRANS_INCLUDE_DIR X11/Xtrans/Xtrans.h)
-    endif()
-    if(NOT TINYX_XTRANS_INCLUDE_DIR)
-        message(FATAL_ERROR
-            "Xtrans headers were not found. Set TINYX_XTRANS_INCLUDE_DIR to "
-            "their include directory.")
-    endif()
 endif()
 
 set(CMAKE_REQUIRED_QUIET TRUE)
@@ -106,9 +92,6 @@ set(XORG_MAN_VERSION "Version 1.0")
 set(PACKAGE_STRING "tinyx ${PROJECT_VERSION}")
 set(PROJECTROOT "${CMAKE_INSTALL_PREFIX}")
 set(TINYX_EMBEDDED_FONTS 1)
-if(NOT EMSCRIPTEN)
-    set(SMART_SCHEDULE 1)
-endif()
 set(KDRIVESERVER 1)
 set(KDRIVEDDXACTIONS 1)
 set(DBE 1)
@@ -116,11 +99,8 @@ set(RES 1)
 set(SCREENSAVER 1)
 if(NOT EMSCRIPTEN)
     set(XF86BIGFONT 1)
-    set(TCPCONN 1)
-    set(UNIXCONN 1)
-    set(IPv6 1)
 else()
-    # Emscripten has no SysV shared memory or descriptor transports.
+    # Emscripten has no SysV shared memory; all products are descriptor-free.
     set(HAS_GETDTABLESIZE "")
 endif()
 set(XResExtension 1)
@@ -149,15 +129,14 @@ set(TINYX_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/kdrive/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/kdrive/memory"
     "${CMAKE_CURRENT_SOURCE_DIR}/os"
-    "${TINYX_XORGPROTO_INCLUDE_DIR}"
-    "${TINYX_XTRANS_INCLUDE_DIR}")
+    "${TINYX_XORGPROTO_INCLUDE_DIR}")
 
 set(TINYX_DIX_SOURCES
     dix/atom.c dix/colormap.c dix/cursor.c dix/devices.c dix/dispatch.c
     dix/dixfonts.c dix/fontstubs.c dix/embedded-font.c
     dix/embedded-font-data.c dix/dixutils.c dix/events.c dix/extension.c
     dix/ffs.c dix/gc.c dix/globals.c dix/glyphcurs.c dix/grabs.c
-    dix/initatoms.c dix/lifecycle.c dix/main.c dix/main-entry.c dix/pixmap.c
+    dix/initatoms.c dix/lifecycle.c dix/main.c dix/pixmap.c
     dix/privates.c dix/property.c dix/resource.c dix/swaprep.c dix/swapreq.c
     dix/tables.c dix/window.c dix/strcasecmp.c)
 
@@ -209,15 +188,8 @@ set(TINYX_SHADOW_SOURCES
     miext/shadow/shrotate.c)
 
 set(TINYX_OS_SOURCES
-    os/WaitFor.c os/connection.c os/host.c os/io.c os/memory.c
-    os/transport.c os/oscolor.c os/osinit.c os/utils.c os/log.c)
-if(EMSCRIPTEN)
-    list(APPEND TINYX_OS_SOURCES os/embedded-security.c)
-else()
-    list(APPEND TINYX_OS_SOURCES
-        os/access.c os/auth.c os/mitauth.c os/xdmauth.c os/xstrans.c
-        os/xauembed.c)
-endif()
+    os/WaitFor.c os/connection.c os/embedded-security.c os/host.c os/io.c
+    os/memory.c os/transport.c os/oscolor.c os/osinit.c os/utils.c os/log.c)
 
 set(TINYX_MEMORY_HOST_SOURCES
     kdrive/src/kcmap.c kdrive/src/kdrive.c kdrive/src/kinfo.c
@@ -236,9 +208,9 @@ foreach(target tinyx-core tinyx-host-memory)
     target_compile_definitions(${target} PRIVATE
         HAVE_DIX_CONFIG_H HAVE_KDRIVE_CONFIG_H
         VENDOR_STRING=\"TinyCore_Linux\" VENDOR_RELEASE=10000000)
+    target_compile_definitions(${target} PRIVATE TINYX_MEMORY_ONLY)
     if(EMSCRIPTEN)
-        target_compile_definitions(${target} PRIVATE
-            TINYX_MEMORY_ONLY TINYX_NO_MITSHM)
+        target_compile_definitions(${target} PRIVATE TINYX_NO_MITSHM)
     endif()
     target_include_directories(${target} PRIVATE ${TINYX_INCLUDE_DIRS})
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -259,9 +231,12 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(tinyx PUBLIC m)
 endif()
 
-if(TINYX_BUILD_EXAMPLE AND NOT EMSCRIPTEN)
-    add_executable(tinyx-embed-example kdrive/memory/embed-example.c)
-    target_link_libraries(tinyx-embed-example PRIVATE tinyx)
+if(TINYX_BUILD_HEADLESS_EMBEDDER AND NOT EMSCRIPTEN)
+    add_executable(tinyx-embedder-headless embedders/headless/main.c)
+    target_link_libraries(tinyx-embedder-headless PRIVATE tinyx)
+    if(TINYX_BUILD_TESTS)
+        add_test(NAME tinyx-embedder-headless COMMAND tinyx-embedder-headless)
+    endif()
 endif()
 
 if(TINYX_BUILD_TESTS)

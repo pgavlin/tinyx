@@ -535,7 +535,7 @@ After parsing, one shared validator verifies:
 
 ## Host responsibilities
 
-A native host may:
+A native embedder may:
 
 1. read `fonts.dir` and `fonts.alias` using its own filesystem policy;
 2. assign stable numeric source identifiers and construct the complete
@@ -622,10 +622,10 @@ Through a descriptor-free client:
 5. **Public provider API:** extend initial server configuration with immutable
    provider operations and the complete source/alias manifest; add callback
    leases, diagnostics, reentrancy guards, and explicit WASM exports.
-6. **Host integration:** teach the Kitty host to discover and preload a font
+6. **Embedder integration:** teach the Kitty embedder to discover and preload a font
    manifest and serve ready uncompressed bytes by source identifier.
 7. **End-to-end validation:** exercise listing without acquisition, lazy open,
-   rendering, caching, aliases, failure, shutdown, native builds, and WASM.
+   rendering, caching, aliases, failure, shutdown, native embedders, and WASM.
 
 ## Completion criteria
 

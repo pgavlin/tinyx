@@ -1,7 +1,7 @@
 /* Descriptor-free embedding security policy.
  *
- * In-process clients are admitted by the embedding host. There is no peer
- * address, authorization file, or mutable network host list in this product.
+ * Logical clients are admitted by the embedder before entering TinyX. There
+ * is no peer address, authorization file, or mutable host list in the core.
  */
 #ifdef HAVE_DIX_CONFIG_H
 #include <dix-config.h>

@@ -1,5 +1,10 @@
 # Finding the Embedding Boundaries
 
+> **Historical design record:** this document describes the pre-embedding
+> architecture and the seams used during extraction. Supported products now
+> use the public API and descriptor-free clients described in
+> [the architecture tour](architecture.md).
+
 This document maps TinyX's source dependencies onto the interfaces an
 embeddable server needs. It complements the [architecture tour](architecture.md).
 
@@ -118,8 +123,8 @@ flowchart LR
 
 The API boundaries should be defined in terms of data the host actually has,
 not Unix file descriptors, Linux scan devices, VTs, or physical video cards.
-The native executable can then implement the same interfaces with its existing
-Unix code.
+A native embedder can implement the same interfaces using whatever window,
+terminal, socket, or event facilities it chooses.
 
 ## 3. User input boundary
 
@@ -166,9 +171,9 @@ MI. DIX then owns focus, grabs, event selection, and delivery.
 - scheduling delivery onto the server's thread;
 - host-specific LED and bell effects, if supported.
 
-For the native build, this is principally `kdrive/linux/keyboard.c`,
-`kdrive/linux/mouse.c`, and the file-descriptor/SIGIO portion of
-`kdrive/src/kinput.c`.
+In the inherited native server this was principally
+`kdrive/linux/keyboard.c`, `kdrive/linux/mouse.c`, and the
+file-descriptor/SIGIO portion of `kdrive/src/kinput.c`.
 
 ### 3.3 What belongs on the server side
 
@@ -387,9 +392,9 @@ requires these concerns to be separated:
 - a host operation that decides when to call it again;
 - optionally, a way for the core to report the next timer deadline.
 
-The native host can reproduce the current behavior by waiting for sockets or
-devices and then calling the same step operation. A browser host can schedule
-it from JavaScript without blocking.
+A native embedder can wait for its own sockets or devices and then call the
+same step operation. A browser embedder can schedule it from JavaScript without
+blocking.
 
 ## 6. The role of KDrive
 
@@ -468,9 +473,9 @@ interface. This is separate from display and protocol transport.
 
 ### Authorization and access control
 
-Native socket credentials, host ACLs, Xauthority files, and XDMCP belong to a
-native host policy. An in-process client API may instead authorize clients at
-creation time. The X11 handshake still belongs to the protocol core.
+Native socket credentials, host ACLs, Xauthority files, and XDMCP belong to an
+embedder's admission policy. TinyX trusts logical clients admitted through its
+API; the X11 handshake still belongs to the protocol core.
 
 ### Shared memory and process-oriented extensions
 

@@ -33,12 +33,11 @@ fn main() {
     let root = manifest.join("../..");
     watch_tree(&root);
     println!("cargo:rerun-if-env-changed=TINYX_XORGPROTO_INCLUDE_DIR");
-    println!("cargo:rerun-if-env-changed=TINYX_XTRANS_INCLUDE_DIR");
 
     let mut config = cmake::Config::new(&root);
     config
         .define("TINYX_BUILD_TESTS", "OFF")
-        .define("TINYX_BUILD_EXAMPLE", "OFF")
+        .define("TINYX_BUILD_HEADLESS_EMBEDDER", "OFF")
         .define("TINYX_BUILD_WASM", "OFF");
     let common_include = [
         "/opt/homebrew/include",
@@ -53,14 +52,6 @@ fn main() {
     } else if let Some(path) = common_include {
         config.define("TINYX_XORGPROTO_INCLUDE_DIR", path);
     }
-    if let Some(path) = env::var_os("TINYX_XTRANS_INCLUDE_DIR") {
-        config.define("TINYX_XTRANS_INCLUDE_DIR", path);
-    } else if let Some(path) =
-        common_include.filter(|path| path.join("X11/Xtrans/Xtrans.h").is_file())
-    {
-        config.define("TINYX_XTRANS_INCLUDE_DIR", path);
-    }
-
     let destination = config.build();
     println!(
         "cargo:rustc-link-search=native={}",

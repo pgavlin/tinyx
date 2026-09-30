@@ -12,9 +12,9 @@ examples, and Emscripten module from explicit source manifests.
 The intended dependency direction is:
 
 ```text
-native host ─┐
-memory host ─┼──> embedding API/core <── DIX, MI, FB, selected extensions
-WASM host ───┘
+Kitty embedder ───┐
+headless embedder ┼──> embedding API/core <── DIX, MI, FB, selected extensions
+WASM embedder ────┘
 ```
 
 Host implementations own acquisition and presentation. The core owns X11
@@ -23,7 +23,7 @@ protocol semantics and server state.
 ## Implementation status
 
 - **Phase 1 complete:** process and generation lifecycle operations are
-  callable, and the native `main()` is a thin adapter.
+  callable. Supported products provide embedder-owned entry points.
 - **Phase 2 complete:** dispatch initialization and teardown are separate from
   execution; bounded `TinyXServerStep()` is nonblocking; the native lifecycle
   retains blocking behavior; pending work and the next timer delay are
@@ -33,9 +33,8 @@ protocol semantics and server state.
   memory clients can feed and drain arbitrary chunks through the same DIX
   connection handshake and dispatch path.
 - **Phase 4 complete:** monotonic time, logging, and host wakeups use explicit
-  runtime operations; native process behavior remains the default; custom
-  hosts can run core calls inside a fatal-error boundary that poisons and
-  unwinds the singleton instead of terminating the process.
+  runtime operations; embedders enter core calls through a fatal-error boundary
+  that poisons and unwinds the singleton instead of terminating the process.
 - **Phase 5 complete:** a KDrive memory backend renders a depth-24, 32-bpp
   screen into allocated or host-provided linear memory and exposes accumulated
   Damage regions without performing presentation. API 1.1 can atomically
@@ -102,7 +101,8 @@ The following are not initial goals:
 - concurrent server instances;
 - thread safety;
 - full parity with every native extension;
-- MIT-SHM, XDMCP, native authorization, DPMS, fbdev, or VESA in WASM;
+- XDMCP, native authorization, DPMS, fbdev, or VESA in supported products;
+- MIT-SHM in WASM;
 - replacing DIX, MI, FB, or the X11 protocol implementation.
 
 ## Phase 1: Extract the server lifecycle
@@ -503,17 +503,15 @@ enter fatal core code uses the protected host boundary; fatal creation cleans
 up its facade and later fatal errors poison the handle.
 
 `kdrive/memory/api.c` adapts the public facade to the earlier internal seams.
-Custom embedding hosts create no native listeners, while the native Xtrans
-path and executables retain their existing behavior. Client send operations
-accept bounded prefixes, and receive operations relieve explicit output
-backpressure. Framebuffer pixels are native-endian and read-only to the host.
+The core creates no listeners: embedders own client acquisition and admit
+logical byte streams through the API. Client send operations accept bounded
+prefixes, and receive operations relieve explicit output backpressure.
+Framebuffer pixels are native-endian and read-only to the host.
 
-`kdrive/memory/embed-example.c` is a native in-process example that includes
-only `tinyx.h`. `kdrive/memory/api-test.c` validates startup without native
-listeners, one-lifetime enforcement, partial client input, the ordinary X11
-setup handshake, bounded output draining, and clean shutdown. The native
-process `main()` is in a separate archive member so an embedder can provide its
-own entry point without a duplicate symbol.
+`embedders/headless/main.c` is a minimal native embedder that includes only
+`tinyx.h`. `kdrive/memory/api-test.c` validates descriptor-free startup,
+one-lifetime enforcement, partial client input, the ordinary X11 setup
+handshake, bounded output draining, and clean shutdown.
 
 ## Phase 9: Add build and host products
 
@@ -522,9 +520,9 @@ targets equivalent to:
 
 ```text
 tinyx-core
-tinyx-host-native
 tinyx-host-memory
 tinyx-api
+tinyx-embedder-headless
 tinyx-wasm
 ```
 
@@ -535,7 +533,8 @@ The new build should:
 - distinguish protocol headers from linked native libraries;
 - build a native static library;
 - build an Emscripten module with an explicit export list;
-- exclude native sockets, signals, hardware, and authorization from WASM;
+- keep client acquisition, sockets, hardware, and authorization policy out of
+  every library target;
 - avoid relying on native `pkg-config` results during cross-compilation.
 
 CMake becomes authoritative after it has equivalent coverage for the intended
@@ -546,17 +545,18 @@ embedded native and WASM targets.
 The root `CMakeLists.txt` maintains explicit subsystem source manifests.
 `tinyx-core` and `tinyx-host-memory` object targets are combined into the
 installed `libtinyx.a`, avoiding legacy static-archive ordering problems. The
-native embedding example and the API/font tests link this library. Generated
-CMake configuration headers select the embedded font backend and memory KDrive.
+headless and Kitty embedders and the API/font tests link this library.
+Generated CMake configuration headers select the embedded font backend and
+memory KDrive.
+
+All products define `TINYX_MEMORY_ONLY`, use descriptor-free clients and the
+embedder admission policy, and exclude Xtrans, native authorization/access,
+XDMCP, Linux input, fbdev, and VESA sources. Native builds retain MIT-SHM and
+XF86BIGFONT as protocol capabilities; WASM excludes them. Bounded cooperative
+stepping supplies scheduling on every platform.
 
 The Emscripten product emits modularized `tinyx-wasm.js` and
 `tinyx-wasm.wasm`. `cmake/wasm-exports.json` is the deliberate C export list.
-The WASM manifest has no Xtrans, native authorization/access implementation,
-XDMCP, MIT-SHM, XF86BIGFONT, Linux input, fbdev, or VESA sources. A small
-trusted in-process security policy supplies the core protocol hooks, and
-`TINYX_MEMORY_ONLY` removes descriptor listener and Xtrans adapter code. The
-WASM configuration also disables the signal-driven smart scheduler; bounded
-cooperative stepping supplies scheduling instead.
 Xorgproto remains a headers-only input and no native `pkg-config` result is
 used while cross-compiling.
 
@@ -602,33 +602,32 @@ alongside boundary extraction rather than after it.
 - test modifiers, grabs, focus, and button state;
 - document and test repeat ownership.
 
-### Native regression tests
+### Native embedder regression tests
 
-- retain successful native startup;
-- verify native Xtrans clients still connect;
-- run representative existing X clients where available;
-- run native builds under sanitizers;
-- regenerate symbol-dependency reports to ensure native-only providers do not
-  leak back into the core.
+- start through the public API without listeners;
+- bridge representative existing X clients through the Kitty embedder;
+- run native library and embedder builds under sanitizers;
+- verify that acquisition and presentation dependencies do not leak into the
+  core library.
 
 ## Architectural completion criteria
 
 The host-independent architecture is considered established when:
 
-- `main()` is a thin native adapter over callable lifecycle operations;
+- embedders initialize the server through the public lifecycle API;
 - one core step is bounded and never blocks;
-- Xtrans, sockets, descriptors, and `select()` are confined to the native host;
-- Linux input and fbdev/VESA code are confined to native backends;
+- Xtrans and native listening sockets are absent from supported library targets;
+- client acquisition and presentation belong to embedders;
 - a memory backend uses the same DIX, MI, FB, and selected-extension core;
 - protocol clients are represented at the embedding boundary as ordered byte
   streams;
 - framebuffer presentation and input acquisition are host responsibilities;
 - time, logging, and fatal failures no longer assume control of the process;
 - the core can start without an implicit native font filesystem;
-- the existing native executable still works.
+- native and WASM embedders use the same public contract.
 
-At that point, WASM is another host implementation and packaging target rather
-than the force defining the internal architecture.
+At that point, WASM is another target for the same embedding model rather than
+the force defining the internal architecture.
 
 ## Expected implementation sequence
 
@@ -646,10 +645,10 @@ A practical commit sequence is:
 10. expose and test damage collection;
 11. separate input injection from native acquisition;
 12. establish the startup-font strategy;
-13. add the public embedding facade and native example;
+13. add the public embedding facade and headless embedder;
 14. audit symbol dependencies and public exports;
-15. add the sidecar Emscripten-compatible build;
-16. add the WASM host and presentation example.
+15. add the Emscripten-compatible build;
+16. add WASM and native presentation embedders.
 
 This sequence is intentionally architecture-first. Build migration begins only
 when the core and host source sets are concrete.

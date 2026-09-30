@@ -52,7 +52,6 @@
 #define HAVE_ALLOCA 1
 #define STDC_HEADERS 1
 #define TINYX_EMBEDDED_FONTS 1
-#cmakedefine SMART_SCHEDULE 1
 #define DBE 1
 #define RES 1
 #define SCREENSAVER 1
@@ -60,9 +59,6 @@
 #define XResExtension 1
 #define KDRIVESERVER 1
 #define KDRIVEDDXACTIONS 1
-#cmakedefine TCPCONN 1
-#cmakedefine IPv6 1
-#cmakedefine UNIXCONN 1
 #define _GNU_SOURCE 1
 
 #endif

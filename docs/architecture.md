@@ -1,10 +1,10 @@
 # A Guided Tour of the TinyX Architecture
 
-TinyX is not a small X implementation written from scratch. It is a compact
-configuration of the traditional X server architecture, using KDrive as its
-DDX and either Linux framebuffer or VESA hardware as its display backend.
-Consequently, the source uses terminology and layering inherited from the
-XFree86/Xorg server.
+TinyX is not a small X implementation written from scratch. It is an
+embeddable configuration of the traditional X server architecture, using
+KDrive with a memory display backend. Consequently, the source uses
+terminology and layering inherited from the XFree86/Xorg server. Historical
+Linux framebuffer and VESA sources remain in the tree but are not built.
 
 This document describes the architecture that exists today. It is intended as
 a map for reading the code, not as a proposal for how the server should be
@@ -19,32 +19,32 @@ and events back to clients.
 ```mermaid
 flowchart TD
     clients["X11 clients"]
-    os["`**os/**<br/>listeners, connections, byte buffers, select(), authentication`"]
+    embedder["`**Embedder**<br/>client acquisition, presentation, host input`"]
+    api["`**tinyx.h**<br/>logical streams, stepping, framebuffer, input`"]
+    os["`**os/**<br/>stream buffering, readiness, timers, runtime services`"]
     dix["`**dix/ — Device-Independent X**<br/>clients, dispatch, resources, windows, GCs, events, properties, selections, fonts, cursors, lifecycle`"]
     mi["`**mi/ — machine-independent**<br/>geometry, regions, windows, exposure and pointer logic`"]
     extensions["`**Extensions**<br/>Xext/, render/, randr/, xfixes/, damageext/, dbe/`"]
     fb["`**fb/ — software framebuffer rendering**<br/>pixel operations, pixmaps, GCs, glyphs, Render support`"]
-    kdrive["`**kdrive/ — the DDX**<br/>screen setup, device integration, cursor, input`"]
-    display["`**fbdev/ or vesa/**<br/>display hardware`"]
-    linux["`**linux/**<br/>VT, keyboard, mouse, host OS`"]
+    kdrive["`**KDrive memory DDX**<br/>screen setup, cursor, injected input`"]
 
-    clients -->|X11 wire protocol| os
+    clients <-->|embedder-owned transport| embedder
+    embedder <--> api
+    api --> os
     os -->|complete requests and output| dix
     dix -->|ScreenRec / GCOps| mi
     dix -->|extension requests| extensions
     mi --> fb
     fb -->|framebuffer memory| kdrive
-    kdrive --> display
-    kdrive --> linux
+    kdrive -->|pixels and damage| api
 
     classDef prose text-align:left
-    class clients,os,dix,mi,extensions,fb,kdrive,display,linux prose
+    class clients,embedder,api,os,dix,mi,extensions,fb,kdrive prose
 ```
 
-The boundaries are not perfectly clean. In particular, `dix/main.c` owns the
-process entry point, while `os/` combines generic server scheduling with a
-concrete Unix transport implementation. Nevertheless, the traditional layers
-are visible throughout the code.
+The internal boundaries are not perfectly clean, but the public embedding
+boundary is explicit: TinyX owns X11 semantics and rendering; embedders own
+client acquisition, event acquisition, and presentation.
 
 ## 2. Vocabulary: DIX, DDX, MI, and FB
 
@@ -74,10 +74,9 @@ OS layer.
 ### DDX: Device-Dependent X
 
 The DDX adapts the generic X server to a display and input environment. TinyX
-uses KDrive as its shared DDX framework. The final device backends are:
-
-- `kdrive/fbdev/` for Linux `/dev/fb*` devices;
-- `kdrive/vesa/` for VESA hardware.
+uses KDrive with `kdrive/memory/` as its supported backend. It renders into
+ordinary memory and accepts input through the embedding API. Historical fbdev
+and VESA backends remain as unbuilt reference sources.
 
 The DDX supplies global entry points expected by DIX, including `InitOutput`,
 `InitInput`, `ddxProcessArgument`, and `ddxUseMsg`.
@@ -111,13 +110,13 @@ is already independent of Linux framebuffer devices.
 |---|---|
 | `dix/` | Core server state and X11 protocol semantics |
 | `include/` | Internal server interfaces and object definitions |
-| `os/` | Unix process setup, Xtrans connections, I/O, auth, timers, waiting |
+| `os/` | Runtime services, client streams, buffering, timers, and legacy native code |
 | `mi/` | Generic rendering, regions, windows, pointer, and event queue logic |
 | `fb/` | Software framebuffer renderer |
 | `kdrive/src/` | Shared compact DDX implementation |
-| `kdrive/linux/` | Linux VT, keyboard, mouse, and OS integration |
-| `kdrive/fbdev/` | Linux framebuffer display backend and `Xfbdev` frontend |
-| `kdrive/vesa/` | VESA display backend and `Xvesa` frontend |
+| `kdrive/memory/` | Supported memory display and public API facade |
+| `embedders/` | Runnable hosts that acquire clients/input and present pixels |
+| `kdrive/linux/`, `fbdev/`, `vesa/` | Unbuilt historical native backends |
 | `miext/damage/` | Internal drawable damage tracking |
 | `miext/shadow/` | Shadow framebuffer and rotation support |
 | `Xext/` | Traditional protocol extensions such as SHAPE and BIG-REQUESTS |
@@ -127,8 +126,8 @@ is already independent of Linux framebuffer devices.
 | `damageext/` | DAMAGE protocol extension |
 | `dbe/` | DOUBLE-BUFFER extension |
 
-The headers in `include/` are not a public SDK. They expose shared internal
-structures and interfaces used across these components.
+Most headers in `include/` expose shared internal structures. `tinyx.h` is the
+installed public embedding API.
 
 ### Compile and link dependency graph
 
@@ -157,9 +156,10 @@ global symbols, and shared globals in both directions: DIX calls through
 The two CMake targets are therefore product/source boundaries, not a strict
 semantic dependency DAG.
 
-The Emscripten manifest excludes native transports, authorization, shared
-memory, Linux input, and hardware display backends. Generated target-specific
-configuration headers make those choices explicit. For a source-level
+All manifests exclude native transports, authorization, Linux input, and
+hardware display backends; Emscripten additionally excludes shared memory.
+Generated target-specific configuration headers make those choices explicit.
+For a source-level
 dependency graph and analysis of the host seams, see
 [Finding the Embedding Boundaries](embedding-boundaries.md).
 
@@ -284,44 +284,39 @@ that initialization order and generation resets matter.
 
 ## 5. Startup and server generations
 
-The process entry point is `main()` in `dix/main.c`.
-
-Its outer structure is:
+The public entry point is `tinyx_server_create()` in `kdrive/memory/api.c`.
+It enters the extracted lifecycle operations in `dix/lifecycle.c`:
 
 ```mermaid
 flowchart TD
-    process["Process-wide initialization"] --> init["Initialize one server generation"]
-    init --> dispatch["Dispatch()"]
-    dispatch --> teardown["Tear down generation resources"]
-    teardown --> decision{"Reset or terminate?"}
-    decision -->|Reset| init
-    decision -->|Terminate| done(["Exit"])
+    create["tinyx_server_create()"] --> process["Process-wide initialization"]
+    process --> init["Initialize one server generation"]
+    init --> step["Bounded tinyx_server_step() calls"]
+    step --> destroy["tinyx_server_destroy()"]
+    destroy --> teardown["Tear down generation and process state"]
 
     classDef prose text-align:left
-    class process,init,dispatch,teardown,decision,done prose
+    class create,process,init,step,destroy,teardown prose
 ```
 
-An X server can reset without exiting. `serverGeneration` is incremented each
-time through the outer loop, and many private-index systems use it to know
-when their state must be recreated.
+The internal X server still has generation machinery, but the public singleton
+facade exposes one generation and no reset operation.
 
 ### Process-wide setup
 
-Before entering the generation loop, `main()`:
-
-1. checks user parameters and authorization;
-2. determines connection limits;
-3. reads the authority-file setting;
-4. processes command-line arguments.
+During creation, `TinyXServerInitialize()` establishes connection limits and
+process-global server state. Command-line parsing, authority files, listeners,
+and process-owned signals are not part of the embedding product.
 
 ### Generation initialization
 
-For each generation, `main()` performs roughly this sequence:
+For each generation, `TinyXServerInitializeGeneration()` performs roughly this
+sequence:
 
 1. Reset screen-saver and DPMS state.
 2. Initialize block/wakeup handlers.
 3. Call `OsInit()`.
-4. Create listening sockets on generation one, or reset them later.
+4. Initialize descriptor-free connection bookkeeping.
 5. Create and initialize `serverClient`.
 6. Initialize the server client's resource table.
 7. Initialize atoms, events, glyph caches, callbacks, and private indices.
@@ -332,7 +327,7 @@ For each generation, `main()` performs roughly this sequence:
 12. Initialize fonts, the default font, and root cursor.
 13. Finish and map each root window.
 14. Construct the X11 connection setup block advertised to new clients.
-15. Enter `Dispatch()`.
+15. Start dispatch state and return control to the embedder.
 
 The ordering is significant. For example, output must exist before root
 windows, input registration refers to the first screen, and the connection
@@ -340,7 +335,7 @@ setup block needs fully initialized formats, visuals, roots, and keycodes.
 
 ### Generation teardown
 
-When `Dispatch()` returns, `main()`:
+During destruction, the lifecycle code:
 
 - restores the screen saver if necessary;
 - closes extensions;
@@ -349,41 +344,33 @@ When `Dispatch()` returns, `main()`:
 - closes and frees screens in reverse order;
 - closes events and fonts;
 - cleans up OS state;
-- either resets or exits according to `dispatchException`.
+- shuts down the singleton facade.
 
-The lifecycle is therefore currently inseparable from the process entry point,
-but the phases themselves are already visible.
+Fatal lifecycle operations run inside the protected host boundary so an
+embedder receives an error instead of losing control of its process.
 
 ## 6. How output is initialized
 
-The final executable supplies `InitOutput()`. For `Xfbdev`, it is in
-`kdrive/fbdev/fbinit.c` and simply delegates to `KdInitOutput()`.
-
-The path is:
+`kdrive/memory/meminit.c` supplies the DDX entry points and delegates to
+`KdInitOutput()`. The path is:
 
 ```mermaid
 flowchart TD
-    main["main()"] --> initOutput["`InitOutput()<br/>_supplied by the final DDX_`"]
+    create["tinyx_server_create()"] --> initOutput["InitOutput()"]
     initOutput --> kdInitOutput["KdInitOutput()"]
-    kdInitOutput --> initCard["`InitCard()<br/>_supplied by fbdev or VESA frontend_`"]
-    initCard --> addCard["KdCardInfoAdd(KdCardFuncs)"]
-    addCard --> cardInit["cardinit()"]
-    cardInit --> screenInit["scrinit()"]
-    screenInit --> formats["Establish pixmap formats"]
+    kdInitOutput --> memory["Configure memory card and screen"]
+    memory --> formats["Establish pixmap formats and visuals"]
     formats --> addScreen["AddScreen(KdScreenInit)"]
-    addScreen --> kdScreenInit["KdScreenInit()"]
-
-    kdScreenInit --> fbSetup["fbSetupScreen()"]
+    addScreen --> fbSetup["fbSetupScreen()"]
     fbSetup --> fbFinish["fbFinishScreenInit()"]
     fbFinish --> miScreenInit["miScreenInit()"]
-    miScreenInit --> wrappers["Install KDrive wrappers"]
-    wrappers --> render["Initialize Render"]
+    miScreenInit --> wrappers["Install KDrive and Damage wrappers"]
+    wrappers --> render["Initialize Render and RandR"]
     render --> cursor["Initialize cursor support"]
     cursor --> colormap["Create the default colormap"]
-    colormap --> enable["Enable the host and display backend"]
 
     classDef prose text-align:left
-    class main,initOutput,kdInitOutput,initCard,addCard,cardInit,screenInit,formats,addScreen,kdScreenInit,fbSetup,fbFinish,miScreenInit,wrappers,render,cursor,colormap,enable prose
+    class create,initOutput,kdInitOutput,memory,formats,addScreen,fbSetup,fbFinish,miScreenInit,wrappers,render,cursor,colormap prose
 ```
 
 ### `KdCardFuncs`
@@ -399,20 +386,15 @@ A display backend describes itself with `KdCardFuncs`. Its callbacks cover:
 - palette access;
 - screen and card teardown.
 
-The fbdev frontend creates `fbdevFuncs` and registers it from `InitCard()`.
-The VESA frontend does the same with `vesaFuncs`.
+The memory backend registers its `KdCardFuncs` from `InitCard()`.
 
-### What the fbdev backend contributes
+### What the memory backend contributes
 
-`kdrive/fbdev/fbdev.c`:
-
-1. opens `/dev/fb0` or the requested framebuffer path;
-2. queries fixed and variable screen information with `ioctl()`;
-3. maps framebuffer memory with `mmap()`;
-4. selects dimensions, depth, stride, visuals, and color masks;
-5. stores the resulting memory and format in `KdScreenInfo.fb`.
-
-After that, generic KDrive and FB code do most drawing work.
+`kdrive/memory/memory.c` validates or allocates linear framebuffer storage,
+materializes configured depths and visuals, initializes Damage tracking, and
+supports atomic framebuffer replacement during resize. It performs no device
+mapping, modesetting, or presentation. Generic KDrive and FB code perform the
+drawing.
 
 ### What FB and MI install
 
@@ -430,63 +412,40 @@ screen behavior.
 ## 7. The main dispatch loop
 
 The dispatcher in `dix/dispatch.c` is the center of normal server execution.
-Its lifecycle is now split into `DispatchStart()`, `DispatchStep()`, and
-`DispatchFinish()`. The native lifecycle repeatedly calls the blocking form of
-`DispatchStep()`; `Dispatch()` remains as a compatibility wrapper. Embedders
-can instead call `TinyXServerStep()`, which polls once, processes no more than
-the supplied request budget, and returns without waiting.
+Its lifecycle is split into `DispatchStart()`, `DispatchStep()`, and
+`DispatchFinish()`. Embedders call `tinyx_server_step()`, which polls once,
+processes no more than the supplied request budget, and returns without
+waiting.
 
-Conceptually the native loop does this:
+Conceptually an embedder drives this loop:
 
 ```mermaid
 flowchart TD
     running{"Server running?"}
-    input["Process pending input events"]
-    wait["Wait for ready clients or devices"]
-    choose["Choose ready clients"]
-    next{"Another selected client?"}
-    read["Read one complete request"]
-    handler["Choose request handler by opcode"]
-    execute["Execute request"]
-    result{"Success?"}
-    error["Send an X error"]
-    flush["Flush output"]
-    done(["Dispatch returns"])
+    wait["Embedder waits for activity or timer"]
+    acquire["Acquire client bytes and host input"]
+    step["tinyx_server_step(request_budget)"]
+    pending["Process input, timers, requests, and output"]
+    report["Return immediate-work and next-timeout state"]
+    done(["Destroy server"])
 
-    running -->|Yes| input --> wait --> choose --> next
-    next -->|Yes| read --> handler --> execute --> result
-    result -->|No| error --> next
-    result -->|Yes| next
-    next -->|No| flush --> running
+    running -->|Yes| wait --> acquire --> step --> pending --> report --> running
     running -->|No| done
 
     classDef prose text-align:left
-    class running,input,wait,choose,next,read,handler,execute,result,error,flush,done prose
+    class running,wait,acquire,step,pending,report,done prose
 ```
 
-The actual loop uses global scheduling state and may process several requests
-from one client before yielding.
+Internal scheduling retains client priorities and fairness while enforcing the
+embedder's request budget.
 
-### Waiting
+### Polling
 
-`WaitForSomething()` in `os/WaitFor.c` combines several concerns:
-
-- processing deferred work;
-- noticing already-buffered complete requests;
-- calculating timer deadlines;
-- running block handlers;
-- flushing pending output;
-- calling `select()` on listeners, clients, and input devices;
-- running wakeup handlers;
-- accepting new connections through queued work;
-- reporting ready client indices to DIX.
-
-This is both the server scheduler and the Unix event-loop implementation.
-`PollForSomething()` runs the same pending-work, timer, handler, output, and
-readiness machinery with a zero timeout. `TimerNextDelay()` reports the next
-timer deadline to a cooperative host. Native descriptor readiness is combined
-with descriptor-free readiness reported by in-memory clients before DIX client
-priority and dispatch scheduling are applied.
+`PollForSomething()` in `os/WaitFor.c` processes deferred work, complete
+buffered requests, timers, block/wakeup handlers, and pending output without
+waiting. `TimerNextDelay()` reports the next deadline to the embedder.
+Descriptor-free readiness is merged with DIX client priorities and dispatch
+scheduling before the bounded request loop runs.
 
 ### Reading a request
 
@@ -527,9 +486,8 @@ errors into protocol error packets with `SendErrorToClient()`.
 Protocol code calls `WriteToClient()` in `os/io.c`. It adds required padding,
 buffers output, and eventually calls `FlushClient()`. `FlushClient()` writes
 through the `TinyXTransportOps` byte-stream interface and retains unwritten
-bytes when the adapter reports backpressure. The Xtrans adapter arranges for a
-writable `select()` wakeup; the memory adapter becomes writable when its host
-drains queued output.
+bytes when the adapter reports backpressure. The memory adapter becomes
+writable when its embedder drains queued output.
 
 Replies, errors, and events all ultimately use this path. Transport operations
 report progress, would-block, orderly close, and failure explicitly, so framing
@@ -537,31 +495,16 @@ and buffering do not inspect descriptors or `errno`.
 
 ## 8. Connection establishment
 
-The native connection path begins in `os/connection.c`.
+Supported products acquire clients through their embedder. The embedder opens
+a descriptor-free logical client and moves bytes through the public API; TinyX
+never listens or accepts connections itself.
 
-### Listening and accepting
-
-`CreateWellKnownSockets()` asks Xtrans to create server listeners and stores
-their file descriptors in `WellKnownConnections` and `AllSockets`.
-
-When `WaitForSomething()` finds a listener ready, it queues
-`EstablishNewConnections()`. That function accepts the transport connection,
-puts it in nonblocking mode, allocates an `OsCommRec`, and calls
-`NextAvailableClient()`.
-
-`OsCommRec` is the transport-facing portion of a client. It contains:
-
-- the optional native file descriptor;
-- input and output buffers;
-- authorization and connection timing state;
-- byte-stream operations and adapter-private data;
-- readiness and backpressure state;
-- native-only Xtrans metadata used by access control.
-
-The pointer is stored in `ClientRec.osPrivate`. Native accepts install the
-Xtrans adapter. `TinyXMemoryClientOpen()` instead creates a descriptor-free
-logical client and still calls `NextAvailableClient()`, so both transports use
-the artificial initial request and normal DIX handshake.
+`OsCommRec` is the transport-facing portion of a client. It contains input and
+output buffers, byte-stream operations and adapter-private data, and readiness
+and backpressure state. The pointer is stored in `ClientRec.osPrivate`.
+`TinyXMemoryClientOpen()` creates this logical connection and calls
+`NextAvailableClient()`, preserving the artificial initial request and normal
+DIX handshake.
 
 ### The artificial initial request
 
@@ -848,9 +791,9 @@ codes, evdev codes, or symbols is a host responsibility. Repeat timing is also
 host-owned: repeated press input is
 filtered through the active X keyboard repeat controls. The memory pointer has
 five X buttons. Optional callbacks expose X bell and LED changes to the host;
-the core does not choose an audio or physical LED implementation. Native Linux
-input acquisition continues to call the same lower-level KDrive enqueue
-functions.
+the core does not choose an audio or physical LED implementation. Historical
+Linux acquisition code uses the same lower-level KDrive enqueue functions but
+is not part of a supported product.
 
 ### Public embedding facade
 
@@ -884,16 +827,13 @@ the intended DPI; zero dimensions retain the historical 75-DPI default at
 creation and preserve DPI across resize. Damage consumption, pointer and key
 injection, scheduling results, and callback lifetime are all represented
 without server internals.
-`kdrive/memory/embed-example.c` demonstrates startup and shutdown using only
-the public header, and `api-test.c` drives an X11 setup handshake through the
-facade.
+`embedders/headless/main.c` demonstrates startup and shutdown using only the
+public header, and `api-test.c` drives an X11 setup handshake through the
+facade. Every runnable product supplies its own entry point; the library has
+none and creates no listeners.
 
-The legacy process entry point occupies its own `libtinyx.a` archive member.
-A host supplies its own entry point without pulling the native lifecycle
-driver. A configured custom host also skips Xtrans listener creation.
-
-`embedders/kitty/` is a complete Rust host over this facade. It adapts a
-nonblocking Unix-domain socket to descriptor-free TinyX clients, consumes
+`embedders/kitty/` is a complete native Rust embedder over this facade. It
+adapts a nonblocking Unix-domain socket to descriptor-free TinyX clients, consumes
 Damage before encoding the read-only framebuffer as PNG, and presents it with
 the Kitty graphics protocol. Before starting concurrent terminal input, it
 uses Kitty's terminal query protocol to obtain the active window's logical DPI
@@ -913,17 +853,16 @@ core window-manager behavior, input, and resizing, as recorded in
 The root `CMakeLists.txt` assembles explicit source manifests into
 `tinyx-core` and `tinyx-host-memory` object targets, then combines them into
 the installed `libtinyx.a`. Object targets avoid imposing artificial archive
-link-order boundaries on the legacy callback graph. The native example and API
-tests link the same static product used by embedders.
+link-order boundaries on the legacy callback graph. The headless and Kitty
+embedders and API tests link the same static product.
 
-Under Emscripten, the manifest replaces native access control and
-authorization with the trusted in-process policy in
-`os/embedded-security.c`. It also excludes Xtrans, XDMCP, MIT-SHM,
-XF86BIGFONT, Linux device acquisition, fbdev, and VESA. `TINYX_MEMORY_ONLY`
-removes descriptor listener and Xtrans-adapter code while retaining generic
-client bookkeeping and protocol buffering. The WASM configuration disables
-the signal-driven smart scheduler in favor of bounded cooperative steps.
-`tinyx-wasm.js` and
+Every target uses the descriptor-free admission policy in
+`os/embedded-security.c`; `TINYX_MEMORY_ONLY` removes descriptor listeners and
+the Xtrans adapter while retaining generic client bookkeeping and protocol
+buffering. The supported manifests exclude Xtrans, XDMCP, native access and
+authorization, Linux device acquisition, fbdev, and VESA. Native builds retain
+MIT-SHM and XF86BIGFONT as protocol capabilities; Emscripten excludes them. Bounded
+cooperative steps supply scheduling on both platforms. `tinyx-wasm.js` and
 `tinyx-wasm.wasm` expose the public v1 functions through the explicit list in
 `cmake/wasm-exports.json`.
 
@@ -1076,20 +1015,16 @@ Examples include:
 
 ### Direct concrete dependencies
 
-The least abstract portions include:
+The supported library still inherits process-oriented implementation details
+such as global `fd_set` bookkeeping and required DDX symbols, but its CMake
+configuration excludes Xtrans, native authorization, device acquisition, and
+hardware presentation. The public lifecycle and dispatch code do not own an
+entry point, blocking wait, client acquisition, presentation, monotonic clock,
+logging, or fatal process policy.
 
-- native Xtrans calls and descriptor bookkeeping in the Xtrans connection
-  adapter;
-- `fd_set` and `select()` state in the native wait path in `os/WaitFor.c`;
-- process and filesystem setup in `os/osinit.c` and `os/utils.c`;
-- native DDX hooks selected as required global symbols.
-
-The reusable lifecycle and dispatch code no longer own the process entry
-point, blocking waits, byte-stream implementation, monotonic clock, logging,
-or fatal process policy.
-
-The architecture is therefore modular, but not organized around one uniform
-host interface.
+Historical native adapters remain in the source tree as unbuilt reference
+code. The supported architecture is modular at the public embedding boundary,
+while internals retain the traditional X server singleton and callback graph.
 
 ## 18. Suggested reading paths
 
@@ -1098,15 +1033,15 @@ reading directories in order.
 
 ### Server lifecycle
 
-1. `dix/main.c`
-2. `os/osinit.c`
-3. `kdrive/linux/linux.c` (`OsVendorInit`)
-4. `kdrive/fbdev/fbinit.c` or `kdrive/vesa/vesainit.c`
+1. `include/tinyx.h`
+2. `kdrive/memory/api.c`
+3. `dix/lifecycle.c`
+4. `kdrive/memory/meminit.c`
 5. `kdrive/src/kdrive.c` (`KdInitOutput`, `KdScreenInit`)
 
 ### Client and request dispatch
 
-1. `os/connection.c` (`CreateWellKnownSockets`, `AllocNewConnection`)
+1. `os/memory.c` (`TinyXMemoryClientOpen`)
 2. `dix/dispatch.c` (`NextAvailableClient`, connection setup)
 3. `os/WaitFor.c`
 4. `os/io.c` (`ReadRequestFromClient`)
@@ -1125,9 +1060,9 @@ reading directories in order.
 
 ### Input
 
-1. `kdrive/fbdev/fbinit.c` (`InitInput`)
-2. `kdrive/src/kinput.c` (`KdInitInput`, enqueue functions)
-3. `kdrive/linux/keyboard.c` and `kdrive/linux/mouse.c`
+1. `include/tinyx.h` (injection API)
+2. `kdrive/memory/api.c`
+3. `kdrive/src/kinput.c` (`KdInitInput`, enqueue functions)
 4. `mi/mieq.c`
 5. `dix/events.c`
 
@@ -1147,8 +1082,8 @@ TinyX has a layered architecture inherited from the traditional X server:
 - **MI** supplies generic geometry, window, cursor, and input algorithms.
 - **FB** rasterizes into framebuffer memory.
 - **KDrive** assembles those pieces into a compact DDX.
-- **fbdev or VESA** provides the physical display.
-- **Linux KDrive code** provides native console and input integration.
+- **the memory host** supplies framebuffer storage and injection endpoints.
+- **embedders** acquire clients and input and present framebuffer damage.
 - **extensions** add protocol and wrap core object operations.
 
 The most important architectural idea is that rendering behavior is assembled

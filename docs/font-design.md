@@ -55,8 +55,8 @@ the embedded implementation.
 ### Port the server to libXfont2
 
 libXfont2 remains filesystem-oriented and has a different server callback
-registration API. Porting to it could improve the native build independently,
-but it does not provide a filesystem-free startup font strategy.
+registration API. Porting to it could support a future filesystem-oriented
+embedder, but it does not provide a filesystem-free startup font strategy.
 
 **Decision:** out of scope for Phase 7. It can replace legacy libXfont in a
 separate native-host change.

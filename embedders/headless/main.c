@@ -1,4 +1,4 @@
-/* Minimal native host using only the public embedding API. */
+/* Minimal headless embedder using only the public TinyX API. */
 #include <stdio.h>
 
 #include "tinyx.h"
