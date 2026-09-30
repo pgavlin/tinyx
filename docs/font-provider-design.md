@@ -8,11 +8,11 @@ filesystem-free built-in font backend described in
 [Phase 7 Font Architecture](font-design.md), but is not yet implemented.
 
 The first implementation should use a synchronous, constrained pull provider.
-Before exposing logical clients, a host installs one provider and registers an
-immutable manifest of canonical font names, aliases, formats, and opaque source
-identifiers. TinyX uses that manifest for name lookup and listing, but acquires
-an uncompressed BDF or PCF byte span from the provider only when protocol work
-first requires that font's contents. TinyX parses and copies the font during
+A host supplies one provider and a complete immutable manifest of canonical
+font names, aliases, formats, and opaque source identifiers in the initial
+server configuration. TinyX uses that manifest for name lookup and listing,
+but acquires an uncompressed BDF or PCF byte span from the provider only when
+protocol work first requires that font's contents. TinyX parses and copies the font during
 that acquisition, releases the provider's byte lease before resuming protocol
 dispatch, and caches the decoded result for the rest of the server lifetime.
 
@@ -29,7 +29,7 @@ The host-font facility should:
 - work identically in native static-library and WebAssembly builds;
 - preserve the existing DIX FPE, font resource, query, and rendering paths;
 - keep `fixed` and `cursor` available without host participation;
-- expose a stable pre-client catalog of canonical XLFD names and aliases;
+- expose a stable creation-time catalog of canonical XLFD names and aliases;
 - acquire and parse a font only when its metrics or glyphs are first needed;
 - avoid copying or retaining provider source bytes after parsing;
 - report malformed or unsupported data without poisoning the server;
@@ -44,7 +44,7 @@ The initial facility does not need to:
 - decompress `.gz`, `.Z`, `.bz2`, or `.xz` streams;
 - perform filesystem or network I/O from a provider callback;
 - suspend an `OpenFont` request for asynchronous acquisition;
-- remove or replace a manifest entry during a server generation;
+- add, remove, or replace a manifest entry after server creation;
 - override the built-in `fixed` or `cursor` names;
 - evict successfully decoded fonts during the server lifetime;
 - retry a provider or parser failure during the same server lifetime.
@@ -90,18 +90,18 @@ support asynchronous acquisition in the initial API.
 
 ### Register a manifest and pull payloads by source identifier
 
-The host declares the complete visible namespace before clients open. TinyX
-copies and freezes that namespace, performs wildcard matching and alias
-resolution itself, and calls the provider only with an opaque identifier from
-a validated manifest entry. The provider returns already-available,
-uncompressed bytes under a short-lived lease. TinyX parses once and caches the
+The host declares the complete visible namespace in `tinyx_config`. TinyX
+validates and copies that namespace while creating the server, performs
+wildcard matching and alias resolution itself, and calls the provider only with
+an opaque identifier from a validated manifest entry. The provider returns
+already-available, uncompressed bytes under a short-lived lease. TinyX parses once and caches the
 host-neutral decoded font.
 
 This preserves deterministic protocol enumeration while avoiding eager parsing
 and source-byte duplication. It also matches the acquire/release seam already
 used by the embedded FPE.
 
-**Decision:** use an immutable pushed manifest with synchronous pulled
+**Decision:** use an immutable creation-time manifest with synchronous pulled
 payloads.
 
 ## Public API
@@ -130,12 +130,6 @@ typedef struct tinyx_font_provider_ops {
     void (*release)(void *userdata, void *lease);
 } tinyx_font_provider_ops;
 
-typedef struct tinyx_font_provider_config {
-    uint32_t struct_size;
-    tinyx_font_provider_ops ops;
-    void *userdata;
-} tinyx_font_provider_config;
-
 typedef struct tinyx_font_source {
     uint32_t struct_size;
     uint64_t source_id;
@@ -143,11 +137,26 @@ typedef struct tinyx_font_source {
 
     /* Required catalog name and expected BDF/PCF canonical FONT value. */
     const char *canonical_name;
-
-    /* Optional additional names for the same immutable font. */
-    const char *const *aliases;
-    size_t alias_count;
 } tinyx_font_source;
+
+typedef struct tinyx_font_alias {
+    uint32_t struct_size;
+    const char *name;
+
+    /* A canonical host-source name or a built-in name, never an alias. */
+    const char *target;
+} tinyx_font_alias;
+
+typedef struct tinyx_font_provider_config {
+    uint32_t struct_size;
+    tinyx_font_provider_ops ops;
+    void *userdata;
+
+    const tinyx_font_source *sources;
+    size_t source_count;
+    const tinyx_font_alias *aliases;
+    size_t alias_count;
+} tinyx_font_provider_config;
 
 /* Appended to the existing size-versioned structure. */
 typedef struct tinyx_config {
@@ -158,75 +167,70 @@ typedef struct tinyx_config {
 void tinyx_font_provider_ops_init(tinyx_font_provider_ops *ops);
 void tinyx_font_provider_config_init(tinyx_font_provider_config *config);
 void tinyx_font_source_init(tinyx_font_source *source);
-
-tinyx_status tinyx_server_add_font_source(
-    tinyx_server *server,
-    const tinyx_font_source *source,
-    tinyx_error *error);
-
-tinyx_status tinyx_server_add_font_alias(
-    tinyx_server *server,
-    const char *alias,
-    const char *target,
-    tinyx_error *error);
+void tinyx_font_alias_init(tinyx_font_alias *alias);
 ```
 
 Exact names remain provisional until implementation, but the semantics below
 are required.
 
-### Configuration and freeze timing
+### Creation-time configuration
 
-The provider is immutable server configuration, like the existing host
-callbacks. The host constructs provider state first and supplies it through
-`tinyx_config` when creating the server. Startup continues to use the
-guaranteed built-in `fixed` and `cursor` fonts, so provider callbacks are not
-invoked by `tinyx_server_create()`.
-
-After creation, the host registers every source manifest entry and adds any
-aliases before opening its first `tinyx_client`. The first successful
-`tinyx_client_open()` freezes the manifest. Subsequent source or alias
-registration returns `TINYX_ERROR_INVALID_STATE`. This keeps `ListFonts`
-deterministic while requests are dispatched and avoids defining removal or
-replacement semantics for open font resources.
+The provider and complete manifest are immutable server configuration, like the
+existing host callbacks and initial screen. The host constructs provider state,
+source descriptors, and aliases first and supplies them through `tinyx_config`.
+There is no post-creation catalog mutation API and no intermediate server state
+in which configuration is incomplete.
 
 A typical host sequence is:
 
 ```c
+tinyx_font_source_init(&sources[0]);
+sources[0].source_id = FONT_9X15;
+sources[0].format = TINYX_FONT_FORMAT_PCF;
+sources[0].canonical_name = canonical_9x15_name;
+
+tinyx_font_alias_init(&aliases[0]);
+aliases[0].name = "9x15";
+aliases[0].target = canonical_9x15_name;
+
 tinyx_font_provider_config_init(&font_provider);
 font_provider.ops.acquire = acquire_font;
 font_provider.ops.release = release_font;
 font_provider.userdata = host_fonts;
+font_provider.sources = sources;
+font_provider.source_count = 1;
+font_provider.aliases = aliases;
+font_provider.alias_count = 1;
 server_config.font_provider = &font_provider;
 
 tinyx_server_create(&server_config, &server, &error);
-
-tinyx_font_source_init(&source);
-source.source_id = FONT_9X15;
-source.format = TINYX_FONT_FORMAT_PCF;
-source.canonical_name = canonical_9x15_name;
-source.aliases = aliases;
-source.alias_count = alias_count;
-tinyx_server_add_font_source(server, &source, &error);
-
-/* Aliases from fonts.alias may also be added separately. */
-tinyx_server_add_font_alias(server, "9x15", canonical_9x15_name, &error);
-
-/* Manifest becomes immutable here. Payloads remain lazily acquired. */
-tinyx_client_open(server, &client_config, &client);
 ```
 
-The provider configuration may be omitted when only built-in fonts are needed.
-Adding a host source without a configured provider returns
-`TINYX_ERROR_INVALID_STATE`. There is exactly one immutable provider per server
-in the initial API; changing it requires creating a different server, which the
-singleton v1 lifetime model does not currently permit.
+TinyX validates and copies the whole manifest atomically before entering the
+core server lifecycle. Duplicate source identifiers, duplicate names, unknown
+alias targets, aliases that target aliases, malformed structures, and
+collisions with built-in names reject creation without publishing a partial
+catalog. An ordinary configuration error leaves `out_server` null and does not
+consume the process's single permitted TinyX lifetime.
 
-`tinyx_config.font_provider`, its nested configuration, and the operation table
-are borrowed only for `tinyx_server_create()`. TinyX validates and copies the
-operations during creation. Only `userdata` remains borrowed for the server
-lifetime and must remain valid until `tinyx_server_destroy()` returns. Older
-callers whose `tinyx_config.struct_size` ends before the appended field behave
-as though `font_provider` were null.
+Startup continues to use the guaranteed built-in `fixed` and `cursor` fonts,
+so provider callbacks are not invoked by `tinyx_server_create()`. The manifest
+is nevertheless already frozen when creation succeeds. Lazy source state may
+subsequently move from unloaded to decoded or terminal failure, but its visible
+names and mappings never change.
+
+The provider configuration may be omitted when only built-in fonts are needed.
+A non-null provider requires valid acquire and release operations. Source and
+alias arrays may be empty, although aliases without host sources may target
+built-in canonical names.
+
+`tinyx_config.font_provider`, its nested configuration, operation table, source
+and alias arrays, and every manifest string are borrowed only for
+`tinyx_server_create()`. TinyX validates and copies them during creation. Only
+`userdata` remains borrowed for the server lifetime and must remain valid until
+`tinyx_server_destroy()` returns. Older callers whose
+`tinyx_config.struct_size` ends before the appended field behave as though
+`font_provider` were null.
 
 The API remains singleton, server-thread-only, non-thread-safe, and
 non-reentrant. Provider state must be initialized before server creation and
@@ -274,10 +278,11 @@ retained where practical as server diagnostic state.
 
 ### Manifest ownership
 
-`canonical_name`, the alias pointer array, each alias string, and `tinyx_error`
-are borrowed only for the duration of a registration call. TinyX validates and
-copies the complete manifest entry atomically. The host may free or reuse every
-manifest input after the call returns.
+The source and alias arrays, every `canonical_name`, alias `name` and `target`,
+and `tinyx_error` are borrowed only for the duration of
+`tinyx_server_create()`. TinyX validates and copies the complete manifest
+atomically. The host may free or reuse every manifest input after creation
+returns.
 
 `source_id` is an opaque value interpreted only by the host. It must be unique
 among host font sources and remains associated with its copied manifest entry.
@@ -286,11 +291,11 @@ native and WebAssembly hosts.
 
 ### Names and aliases
 
-Every source declares its expected canonical name before clients exist. The
-BDF `FONT` declaration or PCF `FONT` property must compare equal to that name
-when the payload is first parsed. A mismatch permanently fails the source and
-is reported as malformed provider data. Requiring the name in the manifest
-prevents lazy parsing from adding a new protocol-visible name after freeze.
+Every source declares its expected canonical name at creation. The BDF `FONT`
+declaration or PCF `FONT` property must compare equal to that name when the
+payload is first parsed. A mismatch permanently fails the source and is
+reported as malformed provider data. Requiring the name in the manifest
+prevents lazy parsing from adding a new protocol-visible name after creation.
 
 Names:
 
@@ -300,10 +305,11 @@ Names:
 - may contain XLFD punctuation but not embedded NUL bytes;
 - must be unique across built-ins, source names, and aliases.
 
-`tinyx_server_add_font_alias()` resolves `target` immediately to a built-in or
-host source and stores a direct reference. The target must already exist.
-There are therefore no alias chains or cycles in the catalog representation.
-Aliases supplied with a source are published atomically with that source.
+Each alias target is resolved while validating the complete creation-time
+manifest and stored as a direct reference to a built-in or host source. Targets
+must name canonical sources rather than other aliases. Declaration order is
+irrelevant, and there can be no alias chains or cycles in the catalog
+representation.
 
 The initial policy rejects every duplicate name with
 `TINYX_ERROR_ALREADY_EXISTS`, even if it would refer to the same font. Built-in
@@ -335,17 +341,19 @@ them.
 
 ### Errors
 
-Server creation and manifest operations return:
+Server creation returns:
 
 - `TINYX_ERROR_INVALID_ARGUMENT` for an invalid provider configuration,
-  callbacks, structures, names, or identifiers;
+  callbacks, structures, names, identifiers, or alias targets;
 - `TINYX_ERROR_ALREADY_EXISTS` for a duplicate source identifier or colliding
   catalog name;
 - `TINYX_ERROR_OUT_OF_MEMORY` for manifest allocation failure;
-- `TINYX_ERROR_INVALID_STATE` when adding a source without a provider, after
-  manifest freeze, or after generation end;
 - `TINYX_ERROR_FATAL` only if an unrelated fatal server invariant unwinds the
   protected operation.
+
+Manifest validation occurs before core initialization. These ordinary errors
+leave `out_server` null, release all temporary copies, and do not poison or
+consume the singleton.
 
 Acquisition and parse failures happen during protocol dispatch rather than the
 configuration call. They must never call `FatalError()` or poison the server.
@@ -389,10 +397,13 @@ extracted into an internal catalog component. Conceptually it stores:
 Its operations resemble:
 
 ```c
-int TinyXFontCatalogSetProvider(const TinyXFontProvider *provider);
-int TinyXFontCatalogAddSource(const TinyXFontSourceManifest *source);
-int TinyXFontCatalogAddAlias(const char *alias, const char *target);
-void TinyXFontCatalogFreeze(void);
+int TinyXFontManifestCreate(const TinyXFontProvider *provider,
+                            const TinyXFontSourceManifest *sources,
+                            size_t source_count,
+                            const TinyXFontAliasManifest *aliases,
+                            size_t alias_count,
+                            TinyXFontManifest **out_manifest);
+int TinyXFontCatalogInstall(TinyXFontManifest *manifest);
 int TinyXFontCatalogAcquire(const char *name, TinyXDecodedFontLease *lease);
 void TinyXFontCatalogReset(void);
 ```
@@ -401,11 +412,12 @@ The actual result type should distinguish provider, malformed-data,
 unsupported-feature, duplicate, and allocation failures without using public
 API types in DIX.
 
-Built-ins are installed first. Source registration validates and allocates all
-names before atomically publishing an entry. Catalog entries never move after
-publication. Name lookup storage may be reallocated because aliases and leases
-refer to stable source/font objects rather than table slots. The first client
-freezes provider, source, and alias collections.
+Manifest creation combines built-in definitions, host sources, and aliases in
+temporary storage, validates the whole namespace, and publishes nothing on
+failure. The facade performs this step before core initialization. Generation
+startup adopts the already immutable manifest when registering the embedded
+FPE. Catalog entries and name mappings never move after successful creation;
+leases refer to stable source/font objects rather than table slots.
 
 On first acquire, a source transitions from unloaded to loading. Reentrant
 lookup of the same or another host source while this state is active is an API
@@ -506,7 +518,7 @@ limits should include:
 
 The manifest should additionally bound the number of host sources, total
 aliases, and total copied name bytes so an embedder cannot create an unbounded
-`ListFonts` workload before freeze. Exact limits should be implementation
+`ListFonts` workload at creation. Exact limits should be implementation
 constants rather than public configuration in the first version.
 
 Every count, offset, stride, area, and cumulative size uses checked arithmetic.
@@ -526,11 +538,13 @@ After parsing, one shared validator verifies:
 A native host may:
 
 1. read `fonts.dir` and `fonts.alias` using its own filesystem policy;
-2. assign stable numeric source identifiers and register the complete manifest;
-3. read, map, and decompress selected `.pcf.gz` files before clients can request
+2. assign stable numeric source identifiers and construct the complete
+   creation-time manifest;
+3. create TinyX with that manifest;
+4. read, map, and decompress selected `.pcf.gz` files before clients can request
    them;
-4. serve the resulting uncompressed spans synchronously from `acquire`;
-5. retain or discard its source cache after TinyX calls `release`, according to
+5. serve the resulting uncompressed spans synchronously from `acquire`;
+6. retain or discard its source cache after TinyX calls `release`, according to
    host policy.
 
 A browser host may fetch or bundle font assets and decompress them with browser
@@ -563,15 +577,16 @@ source provenance and deterministic regeneration instructions.
 
 ### Provider, catalog, and API tests
 
-- configure a provider during server creation and reject malformed operations;
+- configure a provider and complete BDF/PCF manifest during server creation;
 - create a server without a provider and retain built-in-only behavior;
-- reject a host source when no provider was configured;
-- verify provider configuration structures are borrowed only during creation;
-- register BDF and PCF source manifests before opening a client;
-- register canonical names and aliases and list them without acquisition;
-- reject duplicate source identifiers and collisions with built-ins;
-- verify failed multi-alias registration publishes nothing;
-- freeze manifest changes on the first client open;
+- reject missing or malformed provider operations when a manifest is present;
+- verify provider configuration, source, alias, and string storage is borrowed
+  only during creation;
+- list creation-time canonical names and aliases without acquisition;
+- reject duplicate source identifiers, duplicate names, unknown alias targets,
+  alias chains, and collisions with built-ins;
+- verify any invalid source or alias rejects creation and publishes nothing;
+- verify an ordinary manifest error does not consume the singleton lifetime;
 - verify `OpenFont` receives the expected opaque source identifier;
 - verify acquired bytes are released after success and every failure path;
 - verify source bytes may be freed immediately from `release`;
@@ -601,11 +616,11 @@ Through a descriptor-free client:
    with unit and fuzz tests.
 3. **PCF parser:** add a bounded memory reader and required PCF tables, then
    cross-check output against BDF fixtures.
-4. **Manifest and lazy catalog:** combine borrowed built-ins with copied host
-   source descriptors, atomic aliases, freeze semantics, source state, decoded
-   caching, and shutdown ordering.
+4. **Manifest and lazy catalog:** atomically combine borrowed built-ins with
+   copied creation-time source descriptors and aliases; add lazy source state,
+   decoded caching, and shutdown ordering.
 5. **Public provider API:** extend initial server configuration with immutable
-   provider operations; add source types, facade state enforcement, callback
+   provider operations and the complete source/alias manifest; add callback
    leases, diagnostics, reentrancy guards, and explicit WASM exports.
 6. **Host integration:** teach the Kitty host to discover and preload a font
    manifest and serve ready uncompressed bytes by source identifier.
@@ -618,7 +633,8 @@ Host-provided font loading is complete when:
 
 - native and WASM hosts can advertise BDF and PCF sources without giving the
   core filesystem access;
-- manifest names and aliases are copied before clients and remain immutable;
+- manifest names and aliases are validated and copied atomically during server
+  creation and remain immutable;
 - `ListFonts` uses the frozen manifest without acquiring source bytes;
 - metrics or glyph requests synchronously acquire each source at most once;
 - every successful acquisition has one matching release and TinyX retains no
