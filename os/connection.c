@@ -667,7 +667,9 @@ OsCommSetWriteBlocked(OsCommPtr oc, Bool blocked)
         int i;
         AnyClientsWriteBlocked = FALSE;
         for (i = 1; i < currentMaxClients; i++) {
-            if (clients[i] && ((OsCommPtr)clients[i]->osPrivate)->writeBlocked) {
+            OsCommPtr candidate = clients[i] ?
+                (OsCommPtr)clients[i]->osPrivate : NULL;
+            if (candidate && candidate->writeBlocked) {
                 AnyClientsWriteBlocked = TRUE;
                 break;
             }
@@ -688,7 +690,8 @@ OsCommNotifyWritable(OsCommPtr oc)
 static Bool
 MemoryClientReady(OsCommPtr oc)
 {
-    if (oc->fd >= 0 || !oc->inputReady || oc->ignored)
+    /* Retained DIX clients outlive their closed transport. */
+    if (!oc || oc->fd >= 0 || !oc->inputReady || oc->ignored)
         return FALSE;
     return !GrabInProgress || GrabInProgress == oc->clientIndex ||
            oc->grabImpervious;
