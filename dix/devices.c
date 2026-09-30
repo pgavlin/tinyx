@@ -829,6 +829,9 @@ ProcChangeKeyboardMapping(ClientPtr client)
     unsigned len;
 
     KeySymsRec keysyms;
+    KeySym *map;
+    CARD32 *wireMap;
+    unsigned int i;
 
     KeySymsPtr curKeySyms = &inputInfo.keyboard->key->curKeySyms;
 
@@ -847,12 +850,22 @@ ProcChangeKeyboardMapping(ClientPtr client)
         client->errorValue = stuff->keySymsPerKeyCode;
         return BadValue;
     }
+    map = malloc(len * sizeof(*map));
+    if (!map && len)
+        return BadAlloc;
+    wireMap = (CARD32 *) &stuff[1];
+    for (i = 0; i < len; i++)
+        map[i] = wireMap[i];
+
     keysyms.minKeyCode = stuff->firstKeyCode;
     keysyms.maxKeyCode = stuff->firstKeyCode + stuff->keyCodes - 1;
     keysyms.mapWidth = stuff->keySymsPerKeyCode;
-    keysyms.map = (KeySym *) & stuff[1];
-    if (!SetKeySymsMap(curKeySyms, &keysyms))
+    keysyms.map = map;
+    if (!SetKeySymsMap(curKeySyms, &keysyms)) {
+        free(map);
         return BadAlloc;
+    }
+    free(map);
     SendMappingNotify(MappingKeyboard, stuff->firstKeyCode, stuff->keyCodes,
                       client);
     return client->noClientException;
@@ -907,6 +920,9 @@ ProcGetKeyboardMapping(ClientPtr client)
 
     REQUEST(xGetKeyboardMappingReq);
     KeySymsPtr curKeySyms = &inputInfo.keyboard->key->curKeySyms;
+    CARD32 *wireMap;
+    unsigned int count;
+    unsigned int i;
 
     REQUEST_SIZE_MATCH(xGetKeyboardMappingReq);
 
@@ -924,18 +940,21 @@ ProcGetKeyboardMapping(ClientPtr client)
     memset(&rep, 0, sizeof(xGetKeyboardMappingReply));
     rep.type = X_Reply;
     rep.sequenceNumber = client->sequence;
+    count = curKeySyms->mapWidth * stuff->count;
+    wireMap = malloc(count * sizeof(*wireMap));
+    if (!wireMap && count)
+        return BadAlloc;
+    for (i = 0; i < count; i++)
+        wireMap[i] = (CARD32) curKeySyms->map[
+            (stuff->firstKeyCode - curKeySyms->minKeyCode) *
+            curKeySyms->mapWidth + i];
+
     rep.keySymsPerKeyCode = curKeySyms->mapWidth;
-    /* length is a count of 4 byte quantities and KeySyms are 4 bytes */
-    rep.length = (curKeySyms->mapWidth * stuff->count);
+    rep.length = count;
     WriteReplyToClient(client, sizeof(xGetKeyboardMappingReply), &rep);
     client->pSwapReplyFunc = (ReplySwapPtr) CopySwap32Write;
-    WriteSwappedDataToClient(client,
-                             curKeySyms->mapWidth * stuff->count *
-                             sizeof(KeySym),
-                             &curKeySyms->
-                             map[(stuff->firstKeyCode -
-                                  curKeySyms->minKeyCode) *
-                                 curKeySyms->mapWidth]);
+    WriteSwappedDataToClient(client, count * sizeof(*wireMap), wireMap);
+    free(wireMap);
 
     return client->noClientException;
 }

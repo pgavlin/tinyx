@@ -5,7 +5,8 @@ AM_CPPFLAGS = \
 
 noinst_LIBRARIES = libmemory.a
 noinst_PROGRAMS = Xmemory tinyx-embed-example
-check_PROGRAMS = tinyx-api-test tinyx-font-pattern-test tinyx-retained-client-test
+check_PROGRAMS = tinyx-api-test tinyx-font-pattern-test \
+	tinyx-keyboard-map-test tinyx-retained-client-test
 TESTS = $(check_PROGRAMS)
 
 libmemory_a_SOURCES = \
@@ -44,6 +45,14 @@ tinyx_font_pattern_test_LDADD = \
 	$(top_builddir)/dix/libdix.la \
 	@XSERVER_LIBS@
 tinyx_font_pattern_test_DEPENDENCIES = libmemory.a @KDRIVE_LIBS@
+
+tinyx_keyboard_map_test_SOURCES = keyboard-map-test.c meminit.c
+tinyx_keyboard_map_test_LDADD = \
+	libmemory.a \
+	@KDRIVE_LIBS@ \
+	$(top_builddir)/dix/libdix.la \
+	@XSERVER_LIBS@
+tinyx_keyboard_map_test_DEPENDENCIES = libmemory.a @KDRIVE_LIBS@
 
 tinyx_retained_client_test_SOURCES = retained-client-test.c meminit.c
 tinyx_retained_client_test_LDADD = \

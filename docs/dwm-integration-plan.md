@@ -13,6 +13,15 @@ of the work is to validate the existing core protocol, Render, input,
 selection, resize, and socket-host paths together and fix general X11
 compatibility defects exposed by real applications.
 
+Stock st 0.9.3 has completed initial direct bring-up on the Kitty-hosted display
+using macOS XQuartz client libraries. Xft text rendering, shell output, XTEST
+keyboard input, primary selection, clipboard transfer, and explicit window
+resizing all worked. The bring-up exposed and fixed a CMake configuration bug
+that compiled KDrive without `kdrive-config.h` on 64-bit hosts, giving KDrive
+and DIX incompatible `KeySym` widths and corrupting `GetKeyboardMapping`.
+Native and swapped protocol tests now cover keyboard-map reads and changes.
+Running st under dwm and manual terminal-to-Kitty input remain to be validated.
+
 Compiling dwm, Xlib, and application processes into WebAssembly is a separate
 project. It would require a client-side Xlib transport and replacements for
 dwm's native `fork()` and `exec()` behavior; it is not part of this plan.
@@ -165,7 +174,9 @@ Validate:
 
 Completion signal: an interactive shell in stock st renders continuously,
 accepts keyboard and mouse input, copies and pastes text, and survives repeated
-resizes without server-side font-path changes.
+resizes without server-side font-path changes. Automated direct bring-up has
+validated rendering, synthetic keyboard input, both selections, and resizing;
+manual Kitty input remains outstanding.
 
 ### Slice 2: dwm Xft and Render
 

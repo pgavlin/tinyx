@@ -229,6 +229,7 @@ add_library(tinyx-core OBJECT
     ${TINYX_DIX_SOURCES} ${TINYX_MI_SOURCES} ${TINYX_FB_SOURCES}
     ${TINYX_EXTENSION_SOURCES} ${TINYX_SHADOW_SOURCES} ${TINYX_OS_SOURCES})
 add_library(tinyx-host-memory OBJECT ${TINYX_MEMORY_HOST_SOURCES})
+target_compile_definitions(tinyx-host-memory PRIVATE HAVE_CONFIG_H)
 
 foreach(target tinyx-core tinyx-host-memory)
     set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -271,6 +272,10 @@ if(TINYX_BUILD_TESTS)
     add_executable(tinyx-big-endian-test kdrive/memory/big-endian-test.c)
     target_link_libraries(tinyx-big-endian-test PRIVATE tinyx)
     add_test(NAME tinyx-big-endian COMMAND tinyx-big-endian-test)
+
+    add_executable(tinyx-keyboard-map-test kdrive/memory/keyboard-map-test.c)
+    target_link_libraries(tinyx-keyboard-map-test PRIVATE tinyx)
+    add_test(NAME tinyx-keyboard-map COMMAND tinyx-keyboard-map-test)
 
     add_executable(tinyx-font-pattern-test
         kdrive/memory/font-pattern-test.c)

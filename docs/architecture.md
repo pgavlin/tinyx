@@ -962,7 +962,11 @@ the signal-driven smart scheduler in favor of bounded cooperative steps.
 `cmake/wasm-exports.json`.
 
 CMake generates target-specific DIX and KDrive configuration headers rather
-than reusing host Autoconf output or native `pkg-config` link results. The
+than reusing host Autoconf output or native `pkg-config` link results. KDrive
+translation units include `kdrive-config.h`, which in turn includes
+`dix-config.h`; this is required on 64-bit hosts so every subsystem uses the
+server's 32-bit `XID` and `KeySym` definitions. Keyboard mappings are converted
+explicitly between internal `KeySym` values and 32-bit wire values. The
 external xorgproto dependency is headers-only. Autotools remains the reference
 build for native hardware executables and legacy host behavior.
 
