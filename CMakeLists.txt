@@ -273,6 +273,11 @@ if(TINYX_BUILD_TESTS)
     target_link_libraries(tinyx-big-endian-test PRIVATE tinyx)
     add_test(NAME tinyx-big-endian COMMAND tinyx-big-endian-test)
 
+    add_executable(tinyx-visual-config-test
+        kdrive/memory/visual-config-test.c)
+    target_link_libraries(tinyx-visual-config-test PRIVATE tinyx)
+    add_test(NAME tinyx-visual-config COMMAND tinyx-visual-config-test)
+
     add_executable(tinyx-keyboard-map-test kdrive/memory/keyboard-map-test.c)
     target_link_libraries(tinyx-keyboard-map-test PRIVATE tinyx)
     add_test(NAME tinyx-keyboard-map COMMAND tinyx-keyboard-map-test)

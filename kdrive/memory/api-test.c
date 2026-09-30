@@ -24,8 +24,8 @@ main(void)
     unsigned int iterations;
 
     tinyx_screen_config_init(&screen);
-    screen.width = 64;
-    screen.height = 64;
+    screen.framebuffer.width = 64;
+    screen.framebuffer.height = 64;
     tinyx_config_init(&config);
     config.initial_screen = &screen;
 
@@ -77,9 +77,9 @@ main(void)
     while (tinyx_server_take_damage(server, &damage, 1, &count) == TINYX_OK &&
            count != 0)
         ;
-    screen.width = 96;
-    screen.height = 48;
-    if (tinyx_server_resize(server, &screen) != TINYX_OK)
+    screen.framebuffer.width = 96;
+    screen.framebuffer.height = 48;
+    if (tinyx_server_resize(server, &screen.framebuffer) != TINYX_OK)
         return 10;
     if (tinyx_server_get_framebuffer(server, &framebuffer) != TINYX_OK ||
         framebuffer.width != 96 || framebuffer.height != 48 ||
@@ -91,8 +91,9 @@ main(void)
         return 12;
 
     /* Invalid resize input must leave the active framebuffer unchanged. */
-    screen.width = 0;
-    if (tinyx_server_resize(server, &screen) != TINYX_ERROR_INVALID_ARGUMENT)
+    screen.framebuffer.width = 0;
+    if (tinyx_server_resize(server, &screen.framebuffer) !=
+        TINYX_ERROR_INVALID_ARGUMENT)
         return 13;
     if (tinyx_server_get_framebuffer(server, &framebuffer) != TINYX_OK ||
         framebuffer.width != 96 || framebuffer.height != 48)
@@ -104,7 +105,7 @@ main(void)
     if (tinyx_server_destroy(server) != TINYX_OK)
         return 16;
 
-    screen.width = 64;
+    screen.framebuffer.width = 64;
     tinyx_config_init(&config);
     config.initial_screen = &screen;
     if (tinyx_server_create(&config, &second, &error) !=

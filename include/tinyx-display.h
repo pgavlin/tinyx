@@ -26,6 +26,22 @@ extern "C" {
 #define TINYX_MEMORY_DISPLAY_BLUE_MASK  UINT32_C(0x000000ff)
 
 typedef struct {
+    uint32_t visualClass;
+    uint32_t bitsPerRGB;
+    uint32_t colormapEntries;
+    uint32_t redMask;
+    uint32_t greenMask;
+    uint32_t blueMask;
+} TinyXMemoryVisualConfig;
+
+typedef struct {
+    uint32_t depth;
+    uint32_t bitsPerPixel;
+    const TinyXMemoryVisualConfig *visuals;
+    size_t visualCount;
+} TinyXMemoryDepthConfig;
+
+typedef struct {
     uint32_t width;
     uint32_t height;
     /* Zero selects 75 DPI initially and preserves DPI during resize. */
@@ -40,6 +56,11 @@ typedef struct {
     void *pixels;
     /* Size of pixels when non-NULL; ignored for an allocated buffer. */
     size_t pixelsSize;
+    /* Optional immutable depth/visual topology for generation startup. */
+    const TinyXMemoryDepthConfig *depths;
+    size_t depthCount;
+    size_t rootDepthIndex;
+    size_t rootVisualIndex;
 } TinyXMemoryDisplayConfig;
 
 typedef struct {

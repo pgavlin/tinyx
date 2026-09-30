@@ -41,7 +41,9 @@ protocol semantics and server state.
   screen into allocated or host-provided linear memory and exposes accumulated
   Damage regions without performing presentation. API 1.1 can atomically
   replace its dimensions and storage and notifies clients through RandR; API
-  1.2 accepts physical dimensions for host-controlled DPI.
+  1.2 accepts physical dimensions for host-controlled DPI; prerelease API 1.3
+  adds creation-time ordered pixmap depths and exact visuals while preserving
+  the depth-24/32-bpp root presentation format.
 - **Phase 6 complete:** hosts can inject absolute or relative pointer motion,
   button transitions, and X keycode transitions without descriptors; events
   retain the ordinary KDrive, MI, and DIX path and wake cooperative hosts.

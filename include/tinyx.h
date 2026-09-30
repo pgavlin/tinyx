@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 2
+#define TINYX_API_VERSION_MINOR 3
 #define TINYX_NO_TIMEOUT UINT32_MAX
 
 #define TINYX_MIN_KEYCODE 8
@@ -64,19 +64,60 @@ typedef struct tinyx_host_ops {
                  int duration_ms);
 } tinyx_host_ops;
 
-typedef struct tinyx_screen_config {
+typedef enum tinyx_visual_class {
+    TINYX_VISUAL_STATIC_GRAY = 0,
+    TINYX_VISUAL_GRAY_SCALE = 1,
+    TINYX_VISUAL_STATIC_COLOR = 2,
+    TINYX_VISUAL_PSEUDO_COLOR = 3,
+    TINYX_VISUAL_TRUE_COLOR = 4,
+    TINYX_VISUAL_DIRECT_COLOR = 5
+} tinyx_visual_class;
+
+typedef struct tinyx_visual_config {
+    uint32_t visual_class;
+    uint32_t bits_per_rgb;
+    uint32_t colormap_entries;
+    uint32_t red_mask;
+    uint32_t green_mask;
+    uint32_t blue_mask;
+} tinyx_visual_config;
+
+typedef struct tinyx_depth_config {
+    uint32_t depth;
+    uint32_t bits_per_pixel;
+    const tinyx_visual_config *visuals;
+    size_t visual_count;
+} tinyx_depth_config;
+
+typedef struct tinyx_framebuffer_config {
     uint32_t struct_size;
     uint32_t width;
     uint32_t height;
-    size_t stride_bytes;
-    void *pixels;
-    size_t pixels_size;
     /*
      * Optional physical screen dimensions. Zero selects the default 75 DPI
      * during creation and preserves the current DPI during resize.
      */
     uint32_t width_mm;
     uint32_t height_mm;
+    size_t stride_bytes;
+    void *pixels;
+    size_t pixels_size;
+} tinyx_framebuffer_config;
+
+typedef struct tinyx_screen_config {
+    uint32_t struct_size;
+    tinyx_framebuffer_config framebuffer;
+    /*
+     * Optional complete, ordered depth/visual topology. A null pointer and
+     * zero count select the default depth-24 TrueColor screen and legacy
+     * pixmap formats. A custom topology must include depth 1 in 1 bpp. The
+     * selected root must remain depth-24 TrueColor in 32 bpp with the masks
+     * reported by tinyx_framebuffer_info. Arrays are copied during creation.
+     */
+    const tinyx_depth_config *depths;
+    size_t depth_count;
+    size_t root_depth_index;
+    size_t root_visual_index;
 } tinyx_screen_config;
 
 typedef struct tinyx_config {
@@ -127,6 +168,8 @@ typedef struct tinyx_damage_rect {
     uint32_t height;
 } tinyx_damage_rect;
 
+TINYX_API void tinyx_framebuffer_config_init(
+    tinyx_framebuffer_config *config);
 TINYX_API void tinyx_screen_config_init(tinyx_screen_config *config);
 TINYX_API void tinyx_config_init(tinyx_config *config);
 TINYX_API void tinyx_client_config_init(tinyx_client_config *config);
@@ -156,13 +199,13 @@ TINYX_API int tinyx_client_is_closed(const tinyx_client *client);
 TINYX_API void tinyx_client_destroy(tinyx_client *client);
 
 /*
- * Replace the active screen configuration. On success, the previous
- * framebuffer pointer is invalid, old borrowed storage is no longer used,
- * and the new framebuffer is fully damaged. A failure leaves the active
- * screen unchanged.
+ * Replace the active framebuffer geometry and storage without changing the
+ * screen's depth/visual topology. On success, the previous framebuffer
+ * pointer is invalid, old borrowed storage is no longer used, and the new
+ * framebuffer is fully damaged. A failure leaves the active screen unchanged.
  */
 TINYX_API tinyx_status tinyx_server_resize(
-    tinyx_server *server, const tinyx_screen_config *screen);
+    tinyx_server *server, const tinyx_framebuffer_config *framebuffer);
 
 TINYX_API tinyx_status tinyx_server_get_framebuffer(
     tinyx_server *server, tinyx_framebuffer_info *info);

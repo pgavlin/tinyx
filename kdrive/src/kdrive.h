@@ -72,6 +72,11 @@ extern KdCardInfo *kdCardInfo;
 /*
  * Configuration information per X screen
  */
+typedef struct _KdPixmapFormat {
+	CARD8 depth;
+	CARD8 bitsPerPixel;
+} KdPixmapFormat;
+
 typedef struct _KdFrameBuffer {
 	CARD8 *frameBuffer;
 	int depth;
@@ -81,6 +86,8 @@ typedef struct _KdFrameBuffer {
 	Bool shadow;
 	unsigned long visuals;
 	Pixel redMask, greenMask, blueMask;
+	const KdPixmapFormat *pixmapFormats;
+	int numPixmapFormats;
 	void *closure;
 } KdFrameBuffer;
 

@@ -31,6 +31,8 @@ struct tinyx_server {
     tinyx_host_ops host;
     void *hostData;
     struct tinyx_client *clients;
+    TinyXMemoryDepthConfig *depths;
+    size_t depthCount;
     char lastError[1024];
     int inCall;
     int running;
@@ -61,7 +63,7 @@ SetError(tinyx_error *error, tinyx_status status, const char *message)
 }
 
 void
-tinyx_screen_config_init(tinyx_screen_config *config)
+tinyx_framebuffer_config_init(tinyx_framebuffer_config *config)
 {
     if (!config)
         return;
@@ -69,6 +71,16 @@ tinyx_screen_config_init(tinyx_screen_config *config)
     config->struct_size = sizeof(*config);
     config->width = TINYX_DEFAULT_WIDTH;
     config->height = TINYX_DEFAULT_HEIGHT;
+}
+
+void
+tinyx_screen_config_init(tinyx_screen_config *config)
+{
+    if (!config)
+        return;
+    memset(config, 0, sizeof(*config));
+    config->struct_size = sizeof(*config);
+    tinyx_framebuffer_config_init(&config->framebuffer);
 }
 
 void
@@ -141,24 +153,168 @@ HostBell(void *userdata, int volume, int pitch, int duration)
 }
 
 static int
-ValidateScreen(const tinyx_screen_config *screen)
+ValidateFramebuffer(const tinyx_framebuffer_config *framebuffer)
 {
     size_t stride;
 
-    if (!screen || screen->struct_size < sizeof(*screen) ||
-        !screen->width || !screen->height || screen->width > 32767 ||
-        screen->height > 32767 || screen->width_mm > 32767 ||
-        screen->height_mm > 32767 ||
-        (uint64_t)screen->width * 4 > (uint64_t)SIZE_MAX)
+    if (!framebuffer || framebuffer->struct_size < sizeof(*framebuffer) ||
+        !framebuffer->width || !framebuffer->height ||
+        framebuffer->width > 32767 || framebuffer->height > 32767 ||
+        framebuffer->width_mm > 32767 || framebuffer->height_mm > 32767 ||
+        (uint64_t)framebuffer->width * 4 > (uint64_t)SIZE_MAX)
         return 0;
-    stride = screen->stride_bytes ? screen->stride_bytes :
-        (size_t)screen->width * 4;
-    if (stride < (size_t)screen->width * 4 || stride > INT_MAX ||
-        (stride & 3) || screen->height > SIZE_MAX / stride)
+    stride = framebuffer->stride_bytes ? framebuffer->stride_bytes :
+        (size_t)framebuffer->width * 4;
+    if (stride < (size_t)framebuffer->width * 4 || stride > INT_MAX ||
+        (stride & 3) || framebuffer->height > SIZE_MAX / stride)
         return 0;
-    if (screen->pixels && screen->pixels_size < stride * screen->height)
+    if (framebuffer->pixels &&
+        framebuffer->pixels_size < stride * framebuffer->height)
         return 0;
     return 1;
+}
+
+static int
+SupportedPixmapFormat(uint32_t depth, uint32_t bitsPerPixel)
+{
+    if (!depth || depth > 32 || depth > bitsPerPixel)
+        return 0;
+    switch (bitsPerPixel) {
+    case 1:
+    case 4:
+    case 8:
+    case 16:
+    case 24:
+    case 32:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static unsigned int
+CountBits(uint32_t value)
+{
+    unsigned int count = 0;
+
+    while (value) {
+        count += value & 1;
+        value >>= 1;
+    }
+    return count;
+}
+
+static unsigned int
+MaskShift(uint32_t value)
+{
+    unsigned int shift = 0;
+
+    while (value && !(value & 1)) {
+        shift++;
+        value >>= 1;
+    }
+    return shift;
+}
+
+static int
+ValidateVisual(const tinyx_depth_config *depth,
+               const tinyx_visual_config *visual)
+{
+    uint64_t pixelMask = depth->depth == 32 ? UINT32_MAX :
+        (UINT64_C(1) << depth->depth) - 1;
+    uint32_t masks = visual->red_mask | visual->green_mask |
+        visual->blue_mask;
+    uint32_t redValues, greenValues, blueValues, componentEntries;
+    int componentVisual;
+
+    if (visual->visual_class > TINYX_VISUAL_DIRECT_COLOR ||
+        !visual->bits_per_rgb || visual->bits_per_rgb > 16 ||
+        !visual->colormap_entries || visual->colormap_entries > UINT16_MAX ||
+        ((uint64_t)masks & ~pixelMask) ||
+        (visual->red_mask & visual->green_mask) ||
+        (visual->red_mask & visual->blue_mask) ||
+        (visual->green_mask & visual->blue_mask))
+        return 0;
+    componentVisual = visual->visual_class == TINYX_VISUAL_STATIC_COLOR ||
+        visual->visual_class == TINYX_VISUAL_TRUE_COLOR ||
+        visual->visual_class == TINYX_VISUAL_DIRECT_COLOR;
+    if (componentVisual != (masks != 0) ||
+        CountBits(masks) > depth->depth)
+        return 0;
+
+    if (visual->visual_class == TINYX_VISUAL_TRUE_COLOR ||
+        visual->visual_class == TINYX_VISUAL_DIRECT_COLOR) {
+        redValues = visual->red_mask >> MaskShift(visual->red_mask);
+        greenValues = visual->green_mask >> MaskShift(visual->green_mask);
+        blueValues = visual->blue_mask >> MaskShift(visual->blue_mask);
+        if ((redValues & (redValues + 1)) ||
+            (greenValues & (greenValues + 1)) ||
+            (blueValues & (blueValues + 1)))
+            return 0;
+        componentEntries = redValues;
+        if (greenValues > componentEntries)
+            componentEntries = greenValues;
+        if (blueValues > componentEntries)
+            componentEntries = blueValues;
+        return visual->colormap_entries == componentEntries + 1;
+    }
+
+    if (depth->depth >= 16 ||
+        visual->colormap_entries != (UINT32_C(1) << depth->depth))
+        return 0;
+    return 1;
+}
+
+static int
+ValidateScreen(const tinyx_screen_config *screen)
+{
+    const tinyx_depth_config *rootDepth;
+    const tinyx_visual_config *rootVisual;
+    size_t d, other, v;
+    int hasDepthOne = 0;
+
+    if (!screen || screen->struct_size < sizeof(*screen) ||
+        !ValidateFramebuffer(&screen->framebuffer) ||
+        (!!screen->depths != !!screen->depth_count))
+        return 0;
+    if (!screen->depth_count)
+        return 1;
+    if (screen->depth_count > 32 ||
+        screen->root_depth_index >= screen->depth_count)
+        return 0;
+
+    for (d = 0; d < screen->depth_count; d++) {
+        const tinyx_depth_config *depth = &screen->depths[d];
+
+        if (!SupportedPixmapFormat(depth->depth, depth->bits_per_pixel) ||
+            (!!depth->visuals != !!depth->visual_count) ||
+            depth->visual_count > UINT16_MAX)
+            return 0;
+        for (other = 0; other < d; other++)
+            if (screen->depths[other].depth == depth->depth)
+                return 0;
+        if (depth->depth == 1) {
+            if (depth->bits_per_pixel != 1)
+                return 0;
+            hasDepthOne = 1;
+        }
+        for (v = 0; v < depth->visual_count; v++)
+            if (!ValidateVisual(depth, &depth->visuals[v]))
+                return 0;
+    }
+    if (!hasDepthOne)
+        return 0;
+
+    rootDepth = &screen->depths[screen->root_depth_index];
+    if (screen->root_visual_index >= rootDepth->visual_count)
+        return 0;
+    rootVisual = &rootDepth->visuals[screen->root_visual_index];
+    return rootDepth->depth == TINYX_MEMORY_DISPLAY_DEPTH &&
+        rootDepth->bits_per_pixel == TINYX_MEMORY_DISPLAY_BITS_PER_PIXEL &&
+        rootVisual->visual_class == TINYX_VISUAL_TRUE_COLOR &&
+        rootVisual->red_mask == TINYX_MEMORY_DISPLAY_RED_MASK &&
+        rootVisual->green_mask == TINYX_MEMORY_DISPLAY_GREEN_MASK &&
+        rootVisual->blue_mask == TINYX_MEMORY_DISPLAY_BLUE_MASK;
 }
 
 static int
@@ -166,9 +322,61 @@ ValidateConfig(const tinyx_config *config)
 {
     return config && config->struct_size >= sizeof(*config) &&
         config->api_version_major == TINYX_API_VERSION_MAJOR &&
-        config->api_version_minor <= TINYX_API_VERSION_MINOR &&
+        config->api_version_minor == TINYX_API_VERSION_MINOR &&
         config->host.struct_size >= sizeof(config->host) &&
         ValidateScreen(config->initial_screen);
+}
+
+static void
+FreeTopology(tinyx_server *server)
+{
+    size_t d;
+
+    for (d = 0; d < server->depthCount; d++)
+        free((void *)server->depths[d].visuals);
+    free(server->depths);
+    server->depths = NULL;
+    server->depthCount = 0;
+}
+
+static int
+CopyTopology(tinyx_server *server, const tinyx_screen_config *screen)
+{
+    size_t d, v;
+
+    if (!screen->depth_count)
+        return 1;
+    server->depths = calloc(screen->depth_count, sizeof(*server->depths));
+    if (!server->depths)
+        return 0;
+    server->depthCount = screen->depth_count;
+    for (d = 0; d < screen->depth_count; d++) {
+        const tinyx_depth_config *sourceDepth = &screen->depths[d];
+        TinyXMemoryDepthConfig *targetDepth = &server->depths[d];
+        TinyXMemoryVisualConfig *visuals = NULL;
+
+        targetDepth->depth = sourceDepth->depth;
+        targetDepth->bitsPerPixel = sourceDepth->bits_per_pixel;
+        targetDepth->visualCount = sourceDepth->visual_count;
+        if (sourceDepth->visual_count) {
+            visuals = calloc(sourceDepth->visual_count, sizeof(*visuals));
+            if (!visuals) {
+                FreeTopology(server);
+                return 0;
+            }
+        }
+        targetDepth->visuals = visuals;
+        for (v = 0; v < sourceDepth->visual_count; v++) {
+            visuals[v].visualClass = sourceDepth->visuals[v].visual_class;
+            visuals[v].bitsPerRGB = sourceDepth->visuals[v].bits_per_rgb;
+            visuals[v].colormapEntries =
+                sourceDepth->visuals[v].colormap_entries;
+            visuals[v].redMask = sourceDepth->visuals[v].red_mask;
+            visuals[v].greenMask = sourceDepth->visuals[v].green_mask;
+            visuals[v].blueMask = sourceDepth->visuals[v].blue_mask;
+        }
+    }
+    return 1;
 }
 
 typedef struct {
@@ -204,6 +412,7 @@ tinyx_server_create(const tinyx_config *config, tinyx_server **outServer,
     TinyXHostOps hostOps;
     TinyXInputHostOps inputOps;
     TinyXMemoryDisplayConfig display;
+    const tinyx_framebuffer_config *framebuffer;
     InitializeClosure initialize;
     char programName[] = "tinyx";
     char *argv[] = { programName, NULL };
@@ -231,6 +440,11 @@ tinyx_server_create(const tinyx_config *config, tinyx_server **outServer,
     server->host = config->host;
     server->hostData = config->host_userdata;
     server->inCall = 1;
+    if (!CopyTopology(server, config->initial_screen)) {
+        free(server);
+        SetError(error, TINYX_ERROR_OUT_OF_MEMORY, "out of memory");
+        return TINYX_ERROR_OUT_OF_MEMORY;
+    }
 
     memset(&hostOps, 0, sizeof(hostOps));
     if (server->host.monotonic_time_ms)
@@ -240,6 +454,7 @@ tinyx_server_create(const tinyx_config *config, tinyx_server **outServer,
     if (server->host.wakeup)
         hostOps.wakeup = HostWakeup;
     if (!TinyXHostSetOps(&hostOps, server)) {
+        FreeTopology(server);
         free(server);
         SetError(error, TINYX_ERROR_INVALID_STATE,
                  "host runtime cannot be configured");
@@ -253,23 +468,30 @@ tinyx_server_create(const tinyx_config *config, tinyx_server **outServer,
         inputOps.bell = HostBell;
     if (!TinyXInputSetHostOps(&inputOps, server)) {
         (void)TinyXHostSetOps(NULL, NULL);
+        FreeTopology(server);
         free(server);
         SetError(error, TINYX_ERROR_INVALID_STATE,
                  "input host cannot be configured");
         return TINYX_ERROR_INVALID_STATE;
     }
 
+    framebuffer = &config->initial_screen->framebuffer;
     memset(&display, 0, sizeof(display));
-    display.width = config->initial_screen->width;
-    display.height = config->initial_screen->height;
-    display.widthMM = config->initial_screen->width_mm;
-    display.heightMM = config->initial_screen->height_mm;
-    display.strideBytes = config->initial_screen->stride_bytes;
-    display.pixels = config->initial_screen->pixels;
-    display.pixelsSize = config->initial_screen->pixels_size;
+    display.width = framebuffer->width;
+    display.height = framebuffer->height;
+    display.widthMM = framebuffer->width_mm;
+    display.heightMM = framebuffer->height_mm;
+    display.strideBytes = framebuffer->stride_bytes;
+    display.pixels = framebuffer->pixels;
+    display.pixelsSize = framebuffer->pixels_size;
+    display.depths = server->depths;
+    display.depthCount = server->depthCount;
+    display.rootDepthIndex = config->initial_screen->root_depth_index;
+    display.rootVisualIndex = config->initial_screen->root_visual_index;
     if (!TinyXMemoryDisplayConfigure(&display)) {
         (void)TinyXInputSetHostOps(NULL, NULL);
         (void)TinyXHostSetOps(NULL, NULL);
+        FreeTopology(server);
         free(server);
         SetError(error, TINYX_ERROR_INVALID_ARGUMENT,
                  "memory display cannot be configured");
@@ -287,6 +509,7 @@ tinyx_server_create(const tinyx_config *config, tinyx_server **outServer,
         TinyXInputClearHostOpsAfterFatal();
         TinyXHostClearCallbacksAfterFatal();
         activeServer = NULL;
+        FreeTopology(server);
         free(server);
         return TINYX_ERROR_FATAL;
     }
@@ -419,6 +642,7 @@ tinyx_server_destroy(tinyx_server *server)
         TinyXHostClearCallbacksAfterFatal();
     }
     activeServer = NULL;
+    FreeTopology(server);
     free(server);
     return poisoned && status == TINYX_OK ? TINYX_ERROR_POISONED : status;
 }
@@ -640,25 +864,26 @@ ResizeDisplay(void *data)
 }
 
 tinyx_status
-tinyx_server_resize(tinyx_server *server, const tinyx_screen_config *screen)
+tinyx_server_resize(tinyx_server *server,
+                    const tinyx_framebuffer_config *framebuffer)
 {
     ResizeClosure closure;
     tinyx_status status;
 
-    if (!ValidateScreen(screen))
+    if (!ValidateFramebuffer(framebuffer))
         return TINYX_ERROR_INVALID_ARGUMENT;
     status = BeginCall(server, 1);
     if (status != TINYX_OK)
         return status;
 
     memset(&closure, 0, sizeof(closure));
-    closure.config.width = screen->width;
-    closure.config.height = screen->height;
-    closure.config.widthMM = screen->width_mm;
-    closure.config.heightMM = screen->height_mm;
-    closure.config.strideBytes = screen->stride_bytes;
-    closure.config.pixels = screen->pixels;
-    closure.config.pixelsSize = screen->pixels_size;
+    closure.config.width = framebuffer->width;
+    closure.config.height = framebuffer->height;
+    closure.config.widthMM = framebuffer->width_mm;
+    closure.config.heightMM = framebuffer->height_mm;
+    closure.config.strideBytes = framebuffer->stride_bytes;
+    closure.config.pixels = framebuffer->pixels;
+    closure.config.pixelsSize = framebuffer->pixels_size;
     status = RunProtected(server, ResizeDisplay, &closure);
     if (status != TINYX_OK)
         return status;

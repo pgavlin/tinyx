@@ -27,15 +27,25 @@ struct HostOps {
 }
 
 #[repr(C)]
-struct ScreenConfig {
+struct FramebufferConfig {
     struct_size: u32,
     width: u32,
     height: u32,
+    width_mm: u32,
+    height_mm: u32,
     stride_bytes: usize,
     pixels: *mut c_void,
     pixels_size: usize,
-    width_mm: u32,
-    height_mm: u32,
+}
+
+#[repr(C)]
+struct ScreenConfig {
+    struct_size: u32,
+    framebuffer: FramebufferConfig,
+    depths: *const c_void,
+    depth_count: usize,
+    root_depth_index: usize,
+    root_visual_index: usize,
 }
 
 #[repr(C)]
@@ -114,6 +124,7 @@ struct DamageRect {
 }
 
 unsafe extern "C" {
+    fn tinyx_framebuffer_config_init(config: *mut FramebufferConfig);
     fn tinyx_screen_config_init(config: *mut ScreenConfig);
     fn tinyx_config_init(config: *mut Config);
     fn tinyx_client_config_init(config: *mut ClientConfig);
@@ -128,7 +139,10 @@ unsafe extern "C" {
         request_budget: u32,
         result: *mut StepResult,
     ) -> c_int;
-    fn tinyx_server_resize(server: *mut TinyxServer, screen: *const ScreenConfig) -> c_int;
+    fn tinyx_server_resize(
+        server: *mut TinyxServer,
+        framebuffer: *const FramebufferConfig,
+    ) -> c_int;
     fn tinyx_client_open(
         server: *mut TinyxServer,
         config: *const ClientConfig,
@@ -178,13 +192,20 @@ impl Server {
     pub fn create(width: u32, height: u32, width_mm: u32, height_mm: u32) -> Result<Self, String> {
         let mut screen = ScreenConfig {
             struct_size: 0,
-            width: 0,
-            height: 0,
-            stride_bytes: 0,
-            pixels: ptr::null_mut(),
-            pixels_size: 0,
-            width_mm: 0,
-            height_mm: 0,
+            framebuffer: FramebufferConfig {
+                struct_size: 0,
+                width: 0,
+                height: 0,
+                width_mm: 0,
+                height_mm: 0,
+                stride_bytes: 0,
+                pixels: ptr::null_mut(),
+                pixels_size: 0,
+            },
+            depths: ptr::null(),
+            depth_count: 0,
+            root_depth_index: 0,
+            root_visual_index: 0,
         };
         let mut config = Config {
             struct_size: 0,
@@ -201,10 +222,10 @@ impl Server {
         let mut raw = ptr::null_mut();
         unsafe {
             tinyx_screen_config_init(&mut screen);
-            screen.width = width;
-            screen.height = height;
-            screen.width_mm = width_mm;
-            screen.height_mm = height_mm;
+            screen.framebuffer.width = width;
+            screen.framebuffer.height = height;
+            screen.framebuffer.width_mm = width_mm;
+            screen.framebuffer.height_mm = height_mm;
             tinyx_config_init(&mut config);
             config.initial_screen = &screen;
             let result = tinyx_server_create(&config, &mut raw, &mut error);
@@ -224,23 +245,23 @@ impl Server {
     }
 
     pub fn resize(&self, width: u32, height: u32) -> Result<(), String> {
-        let mut screen = ScreenConfig {
+        let mut framebuffer = FramebufferConfig {
             struct_size: 0,
             width: 0,
             height: 0,
+            width_mm: 0,
+            height_mm: 0,
             stride_bytes: 0,
             pixels: ptr::null_mut(),
             pixels_size: 0,
-            width_mm: 0,
-            height_mm: 0,
         };
         unsafe {
-            tinyx_screen_config_init(&mut screen);
-            screen.width = width;
-            screen.height = height;
+            tinyx_framebuffer_config_init(&mut framebuffer);
+            framebuffer.width = width;
+            framebuffer.height = height;
             status(
                 "tinyx_server_resize",
-                tinyx_server_resize(self.raw.as_ptr(), &screen),
+                tinyx_server_resize(self.raw.as_ptr(), &framebuffer),
             )
         }
     }

@@ -1,6 +1,7 @@
 [
   "_malloc",
   "_free",
+  "_tinyx_framebuffer_config_init",
   "_tinyx_screen_config_init",
   "_tinyx_config_init",
   "_tinyx_client_config_init",

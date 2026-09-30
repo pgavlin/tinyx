@@ -875,8 +875,12 @@ at a step boundary; when caller storage is too small, they collapse to one
 bounding rectangle. The memory backend can atomically replace the dimensions,
 stride, and allocated or borrowed storage of its single screen. It updates the
 screen pixmap and root clipping, fully damages the replacement, and uses RandR
-to notify X11 clients. No core code performs window-system presentation or
-pixel upload. The native fbdev and VESA backends remain separate and unchanged.
+to notify X11 clients. At generation creation it can also install an ordered,
+host-supplied list of FB-supported pixmap depths and exact X11 visuals while
+keeping the presented root at depth 24 in 32 bpp. Alternate-depth resources do
+not imply overlay composition into that root framebuffer. No core code performs
+window-system presentation or pixel upload. The native fbdev and VESA backends
+remain separate and unchanged.
 
 ### Host input injection
 
@@ -915,14 +919,21 @@ bytes to the server and may accept a bounded prefix, while
 `tinyx_client_receive()` drains server output. Both queues are finite.
 
 The framebuffer is exposed as read-only host data in native-endian depth-24,
-32-bpp words. API 1.1 can resize the single screen with the same screen
-configuration descriptor used at creation; success invalidates the previous
-framebuffer view and borrowed-storage lease and produces RandR notifications.
-API 1.2 lets the host provide physical millimeter dimensions so X11 and Xft
-clients derive the intended DPI; zero dimensions retain the historical 75-DPI
-default at creation and preserve DPI across resize.
-Damage consumption, pointer and key injection, scheduling results, and callback
-lifetime are all represented without server internals.
+32-bpp words. The creation-time screen descriptor may provide ordered pixmap
+depths and exact visuals while retaining that fixed root presentation format.
+The memory DDX materializes them as real `DepthRec` and `VisualRec` objects, so
+clients can create alternate-depth colormaps, windows, pixmaps, and GCs. The
+configuration is copied at creation and remains immutable; indexed overlay or
+plane-group composition into the root framebuffer is not implied.
+
+Mutable dimensions, physical dimensions, stride, and storage occupy a separate
+framebuffer descriptor used at creation and resize. Resize invalidates the
+previous framebuffer view and borrowed-storage lease and produces RandR
+notifications. Physical millimeter dimensions let X11 and Xft clients derive
+the intended DPI; zero dimensions retain the historical 75-DPI default at
+creation and preserve DPI across resize. Damage consumption, pointer and key
+injection, scheduling results, and callback lifetime are all represented
+without server internals.
 `kdrive/memory/embed-example.c` demonstrates startup and shutdown using only
 the public header, and `api-test.c` drives an X11 setup handshake through the
 facade.

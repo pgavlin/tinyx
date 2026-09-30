@@ -35,8 +35,9 @@ The first public API should provide:
 
 The first version does not attempt to provide concurrent server instances,
 thread safety, native listeners, generation reset, or a public font-provider
-interface. API 1.1 adds runtime resizing of the single memory screen, and API
-1.2 adds host-supplied physical screen dimensions for DPI-aware clients.
+interface. API 1.1 added runtime resizing, API 1.2 added host-supplied physical
+screen dimensions, and the breaking prerelease API 1.3 separates mutable
+framebuffer state from creation-time depth and visual topology.
 
 ## Public header shape
 
@@ -58,7 +59,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 2
+#define TINYX_API_VERSION_MINOR 3
 
 typedef struct tinyx_server tinyx_server;
 typedef struct tinyx_client tinyx_client;
@@ -135,27 +136,52 @@ The wakeup callback is advisory. It tells the host to arrange a future call to
 ### Screen and server configuration
 
 ```c
-typedef struct tinyx_screen_config {
-    uint32_t struct_size;
+typedef enum tinyx_visual_class {
+    TINYX_VISUAL_STATIC_GRAY = 0,
+    TINYX_VISUAL_GRAY_SCALE = 1,
+    TINYX_VISUAL_STATIC_COLOR = 2,
+    TINYX_VISUAL_PSEUDO_COLOR = 3,
+    TINYX_VISUAL_TRUE_COLOR = 4,
+    TINYX_VISUAL_DIRECT_COLOR = 5
+} tinyx_visual_class;
 
+typedef struct tinyx_visual_config {
+    uint32_t visual_class;
+    uint32_t bits_per_rgb;
+    uint32_t colormap_entries;
+    uint32_t red_mask;
+    uint32_t green_mask;
+    uint32_t blue_mask;
+} tinyx_visual_config;
+
+typedef struct tinyx_depth_config {
+    uint32_t depth;
+    uint32_t bits_per_pixel;
+    const tinyx_visual_config *visuals;
+    size_t visual_count;
+} tinyx_depth_config;
+
+typedef struct tinyx_framebuffer_config {
+    uint32_t struct_size;
     uint32_t width;
     uint32_t height;
-
-    /* Zero selects width * 4. */
-    size_t stride_bytes;
-
-    /*
-     * Optional borrowed framebuffer. NULL asks TinyX to allocate it.
-     * A supplied buffer remains owned by the host.
-     */
-    void *pixels;
-    size_t pixels_size;
-
-    /* Optional physical dimensions; zero selects/preserves default DPI. */
     uint32_t width_mm;
     uint32_t height_mm;
+    size_t stride_bytes;
+    void *pixels;
+    size_t pixels_size;
+} tinyx_framebuffer_config;
+
+typedef struct tinyx_screen_config {
+    uint32_t struct_size;
+    tinyx_framebuffer_config framebuffer;
+    const tinyx_depth_config *depths;
+    size_t depth_count;
+    size_t root_depth_index;
+    size_t root_visual_index;
 } tinyx_screen_config;
 
+void tinyx_framebuffer_config_init(tinyx_framebuffer_config *config);
 void tinyx_screen_config_init(tinyx_screen_config *config);
 
 typedef struct tinyx_config {
@@ -190,25 +216,35 @@ to the implementation's diagnostic limit, and remains valid until server
 destruction. This is one of the inspection operations permitted on a poisoned
 server. It must still be called from the server thread and outside a callback.
 
-`tinyx_screen_config_init()` zeroes the screen descriptor, records its size,
-and installs the default dimensions and allocation policy. The host may then
-override the dimensions, physical dimensions, stride, or storage. Zero
-physical dimensions select the historical 75 DPI at creation. Supplying one
-or both millimeter dimensions controls the corresponding X11 screen DPI;
+`tinyx_framebuffer_config_init()` records its size and installs the default
+dimensions and allocation policy. Zero physical dimensions select the
+historical 75 DPI at creation and preserve the current DPI during resize.
+Supplying millimeter dimensions controls the corresponding X11 screen DPI;
 values must fit the protocol's 16-bit physical-size fields.
-`tinyx_config_init()` similarly records the API version and installs server
-defaults. The host assigns a
-pointer to its screen descriptor to `initial_screen` before creation.
 
-The screen descriptor is copied during `tinyx_server_create()`, so the
-`tinyx_screen_config` object itself only needs to remain valid for that call.
-If `pixels` is non-null, however, the referenced storage remains borrowed for
-the active screen's lifetime.
+`tinyx_screen_config_init()` initializes both the screen and its nested
+framebuffer configuration. A null depth pointer and zero depth count select
+the historical default topology: a depth-24 TrueColor root in 32-bpp storage
+and the traditional KDrive pixmap formats. With a custom topology, each
+ordered depth entry supplies its pixmap storage bpp and an ordered visual
+list. A depth may have no visuals, as for the required depth-1 bitmap format.
+The root indexes select one visual within one depth entry.
 
-Keeping `initial_screen` as a pointer rather than embedding the descriptor by
-value lets `tinyx_screen_config` grow independently without shifting fields in
-`tinyx_config`. It also provides a reusable input contract for a future screen
-resize operation.
+Custom depth and visual arrays are validated and deep-copied during
+`tinyx_server_create()`, so all configuration descriptors only need to remain
+valid for that call. If framebuffer `pixels` is non-null, the referenced
+storage remains borrowed for the active framebuffer lifetime. The configured
+depth and visual topology is immutable after creation.
+
+The current memory presenter requires the root to remain depth-24 TrueColor in
+32-bpp storage with the documented RGB masks. Non-root FB-supported depths may
+use different storage widths; in particular, depth 2 may use 8 bpp and depth
+12 may use 16 bpp. Alternate-depth colormaps, windows, pixmaps, GCs, and core
+drawing are real server resources. Compositing indexed alternate-depth windows
+into the presented root framebuffer is not an overlay or plane-group contract.
+
+`tinyx_config_init()` records the API version and installs server defaults. The
+host assigns its screen descriptor to `initial_screen` before creation.
 
 Server creation does not accept `argc`, `argv`, environment variables, display
 numbers, sockets, or authorization settings. It creates the memory-display
@@ -421,29 +457,28 @@ write access for the active screen's lifetime.
 
 #### Runtime resize
 
-API 1.1 implements the operation anticipated by the original screen descriptor
-design:
+Runtime resize accepts only mutable framebuffer state; depth and visual
+topology remain immutable:
 
 ```c
 tinyx_status tinyx_server_resize(
     tinyx_server *server,
-    const tinyx_screen_config *screen);
+    const tinyx_framebuffer_config *framebuffer);
 ```
 
-The descriptor is copied during the call and follows the same validation and
-storage rules as `initial_screen`. A successful resize invalidates the previous
+The descriptor is copied during the call and follows the same storage rules as
+the initial framebuffer. A successful resize invalidates the previous
 framebuffer view, stops using old borrowed storage before returning, clears and
 fully damages the new framebuffer, resizes the root window, constrains the
 pointer to the new geometry, and notifies X11 clients through RandR and root
-`ConfigureNotify` events. The host must fetch framebuffer metadata again.
-A failed resize leaves the existing screen and framebuffer unchanged.
+`ConfigureNotify` events. The host must fetch framebuffer metadata again. A
+failed resize leaves the existing screen and framebuffer unchanged.
 
-Only the existing screen is resized: this does not create another screen or
-server generation, and the depth-24/32-bpp pixel format remains fixed. API 1.2
-allows the host to supply `width_mm` and `height_mm`. A zero axis preserves its
-previous logical DPI across the resize; a nonzero axis replaces that physical
-dimension and therefore its DPI. X11 RandR requests use the physical dimensions
-supplied by the client.
+Only the existing screen is resized: this does not create another screen,
+server generation, depth, or visual. A zero physical-size axis preserves its
+previous logical DPI; a nonzero axis replaces that physical dimension and
+therefore its DPI. X11 RandR requests use the physical dimensions supplied by
+the client.
 
 ### Damage consumption
 
@@ -524,7 +559,7 @@ a host wakeup.
 | `tinyx_client` | host | until client destroy or parent server destroy |
 | callback table | copied by TinyX | server lifetime |
 | callback userdata | host | through server destruction |
-| initial screen descriptor | host, copied synchronously | only needed during creation |
+| initial screen, depth, and visual descriptors | host, copied synchronously | only needed during creation |
 | bytes passed to `send` | host, partially or fully copied synchronously | accepted prefix only needed during call |
 | bytes returned by `receive` | host | host-controlled |
 | host framebuffer | host, exclusively borrowed for TinyX writes | active screen configuration |

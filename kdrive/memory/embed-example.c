@@ -14,8 +14,8 @@ main(void)
     tinyx_status status;
 
     tinyx_screen_config_init(&screen);
-    screen.width = 640;
-    screen.height = 480;
+    screen.framebuffer.width = 640;
+    screen.framebuffer.height = 480;
 
     tinyx_config_init(&config);
     config.initial_screen = &screen;

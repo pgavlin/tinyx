@@ -10,6 +10,8 @@
 #include "memory.h"
 #include "tinyx-display.h"
 #include "damage.h"
+#include "micmap.h"
+#include "resource.h"
 
 typedef struct {
     CARD8 *pixels;
@@ -20,6 +22,7 @@ typedef struct {
     PixmapPtr screenPixmap;
     ScreenPtr screen;
     KdScreenInfo *screenInfo;
+    KdPixmapFormat *formats;
 } TinyXMemoryPriv;
 
 static TinyXMemoryDisplayConfig memoryConfig;
@@ -163,10 +166,104 @@ TinyXMemoryCardInit(KdCardInfo *card)
     return TRUE;
 }
 
+static int
+TinyXMemoryMaskShift(Pixel mask)
+{
+    int shift = 0;
+
+    if (!mask)
+        return 0;
+    while (!(mask & 1)) {
+        shift++;
+        mask >>= 1;
+    }
+    return shift;
+}
+
+static Bool
+TinyXMemoryInitVisuals(VisualPtr *visualOut, DepthPtr *depthOut,
+                       int *visualCountOut, int *depthCountOut,
+                       int *rootDepthOut, VisualID *rootVisualOut,
+                       unsigned long sizes, int bitsPerRGB,
+                       int preferredVisual)
+{
+    VisualPtr visuals = NULL;
+    DepthPtr depths = NULL;
+    VisualPtr visual;
+    size_t visualCount = 0;
+    size_t d, v;
+
+    (void)sizes;
+    (void)bitsPerRGB;
+    (void)preferredVisual;
+
+    for (d = 0; d < memoryConfig.depthCount; d++)
+        visualCount += memoryConfig.depths[d].visualCount;
+    depths = calloc(memoryConfig.depthCount, sizeof(*depths));
+    visuals = calloc(visualCount, sizeof(*visuals));
+    if (!depths || !visuals)
+        goto fail;
+
+    visual = visuals;
+    for (d = 0; d < memoryConfig.depthCount; d++) {
+        const TinyXMemoryDepthConfig *sourceDepth = &memoryConfig.depths[d];
+
+        depths[d].depth = sourceDepth->depth;
+        depths[d].numVids = sourceDepth->visualCount;
+        if (sourceDepth->visualCount) {
+            depths[d].vids = calloc(sourceDepth->visualCount,
+                                    sizeof(*depths[d].vids));
+            if (!depths[d].vids)
+                goto fail;
+        }
+        for (v = 0; v < sourceDepth->visualCount; v++, visual++) {
+            const TinyXMemoryVisualConfig *source = &sourceDepth->visuals[v];
+
+            visual->class = source->visualClass;
+            visual->bitsPerRGBValue = source->bitsPerRGB;
+            visual->ColormapEntries = source->colormapEntries;
+            visual->nplanes = sourceDepth->depth;
+            visual->vid = FakeClientID(0);
+            visual->redMask = source->redMask;
+            visual->greenMask = source->greenMask;
+            visual->blueMask = source->blueMask;
+            visual->offsetRed = TinyXMemoryMaskShift(source->redMask);
+            visual->offsetGreen = TinyXMemoryMaskShift(source->greenMask);
+            visual->offsetBlue = TinyXMemoryMaskShift(source->blueMask);
+            depths[d].vids[v] = visual->vid;
+            if (d == memoryConfig.rootDepthIndex &&
+                v == memoryConfig.rootVisualIndex) {
+                *rootDepthOut = sourceDepth->depth;
+                *rootVisualOut = visual->vid;
+            }
+        }
+    }
+
+    *visualOut = visuals;
+    *depthOut = depths;
+    *visualCountOut = visualCount;
+    *depthCountOut = memoryConfig.depthCount;
+    miClearVisualTypes();
+    miResetInitVisuals();
+    return TRUE;
+
+fail:
+    if (depths) {
+        for (d = 0; d < memoryConfig.depthCount; d++)
+            free(depths[d].vids);
+    }
+    free(depths);
+    free(visuals);
+    miClearVisualTypes();
+    miResetInitVisuals();
+    return FALSE;
+}
+
 static Bool
 TinyXMemoryScreenInit(KdScreenInfo *screen)
 {
     TinyXMemoryPriv *priv = screen->card->driver;
+    size_t i;
 
     if (priv->screenInitialized) {
         ErrorF("memory display supports exactly one screen\n");
@@ -187,6 +284,21 @@ TinyXMemoryScreenInit(KdScreenInfo *screen)
     screen->fb.redMask = TINYX_MEMORY_DISPLAY_RED_MASK;
     screen->fb.greenMask = TINYX_MEMORY_DISPLAY_GREEN_MASK;
     screen->fb.blueMask = TINYX_MEMORY_DISPLAY_BLUE_MASK;
+    if (memoryConfig.depthCount) {
+        if (memoryConfig.depthCount > INT_MAX / sizeof(*priv->formats))
+            return FALSE;
+        priv->formats = calloc(memoryConfig.depthCount, sizeof(*priv->formats));
+        if (!priv->formats)
+            return FALSE;
+        for (i = 0; i < memoryConfig.depthCount; i++) {
+            priv->formats[i].depth = memoryConfig.depths[i].depth;
+            priv->formats[i].bitsPerPixel =
+                memoryConfig.depths[i].bitsPerPixel;
+        }
+        screen->fb.pixmapFormats = priv->formats;
+        screen->fb.numPixmapFormats = memoryConfig.depthCount;
+        miInitVisualsProc = TinyXMemoryInitVisuals;
+    }
     screen->memory_base = priv->pixels;
     screen->memory_size = priv->size;
     screen->off_screen_base = priv->size;
@@ -417,6 +529,7 @@ TinyXMemoryCardFini(KdCardInfo *card)
         activeMemory = NULL;
     if (priv->ownsPixels)
         free(priv->pixels);
+    free(priv->formats);
     free(priv);
     card->driver = NULL;
 }

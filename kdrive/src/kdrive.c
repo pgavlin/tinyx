@@ -1086,7 +1086,11 @@ static Bool KdSetPixmapFormats(ScreenInfo * pScreenInfo)
 	CARD8 depthToBpp[33];	/* depth -> bpp map */
 	KdCardInfo *card;
 	KdScreenInfo *screen;
-	int i;
+	const KdPixmapFormat *customFormats = NULL;
+	int customFormatCount = 0;
+	int screenCount = 0;
+	int customScreenCount = 0;
+	int i, j;
 	int bpp;
 	PixmapFormatRec *format;
 
@@ -1097,10 +1101,29 @@ static Bool KdSetPixmapFormats(ScreenInfo * pScreenInfo)
 	 * Generate mappings between bitsPerPixel and depth,
 	 * also ensure that all screens comply with protocol
 	 * restrictions on equivalent formats for the same
-	 * depth on different screens
+	 * depth on different screens. A DDX may instead provide a complete,
+	 * ordered format list; every screen must then provide the same list.
 	 */
 	for (card = kdCardInfo; card; card = card->next) {
 		for (screen = card->screenList; screen; screen = screen->next) {
+			screenCount++;
+			if (screen->fb.numPixmapFormats) {
+				customScreenCount++;
+				if (!customFormats) {
+					customFormats = screen->fb.pixmapFormats;
+					customFormatCount = screen->fb.numPixmapFormats;
+				}
+				else {
+					if (customFormatCount != screen->fb.numPixmapFormats)
+						return FALSE;
+					for (i = 0; i < customFormatCount; i++)
+						if (customFormats[i].depth !=
+						    screen->fb.pixmapFormats[i].depth ||
+						    customFormats[i].bitsPerPixel !=
+						    screen->fb.pixmapFormats[i].bitsPerPixel)
+							return FALSE;
+				}
+			}
 			bpp = screen->fb.bitsPerPixel;
 			if (bpp == 24)
 				bpp = 32;
@@ -1111,19 +1134,33 @@ static Bool KdSetPixmapFormats(ScreenInfo * pScreenInfo)
 		}
 	}
 
-	/*
-	 * Fill in additional formats
-	 */
-	for (i = 0; i < NUM_KD_DEPTHS; i++)
-		if (!depthToBpp[kdDepths[i].depth])
-			depthToBpp[kdDepths[i].depth] = kdDepths[i].bpp;
-
 	pScreenInfo->imageByteOrder = IMAGE_BYTE_ORDER;
 	pScreenInfo->bitmapScanlineUnit = BITMAP_SCANLINE_UNIT;
 	pScreenInfo->bitmapScanlinePad = BITMAP_SCANLINE_PAD;
 	pScreenInfo->bitmapBitOrder = BITMAP_BIT_ORDER;
-
 	pScreenInfo->numPixmapFormats = 0;
+
+	if (customFormats) {
+		if (customScreenCount != screenCount || customFormatCount > MAXFORMATS)
+			return FALSE;
+		for (i = 0; i < customFormatCount; i++) {
+			if (!customFormats[i].depth || customFormats[i].depth > 32)
+				return FALSE;
+			for (j = 0; j < i; j++)
+				if (customFormats[j].depth == customFormats[i].depth)
+					return FALSE;
+			format = &pScreenInfo->formats[pScreenInfo->numPixmapFormats++];
+			format->depth = customFormats[i].depth;
+			format->bitsPerPixel = customFormats[i].bitsPerPixel;
+			format->scanlinePad = BITMAP_SCANLINE_PAD;
+		}
+		return TRUE;
+	}
+
+	/* Fill in the traditional KDrive formats. */
+	for (i = 0; i < NUM_KD_DEPTHS; i++)
+		if (!depthToBpp[kdDepths[i].depth])
+			depthToBpp[kdDepths[i].depth] = kdDepths[i].bpp;
 
 	for (i = 1; i <= 32; i++) {
 		if (depthToBpp[i]) {

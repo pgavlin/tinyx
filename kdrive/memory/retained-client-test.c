@@ -59,8 +59,8 @@ main(void)
     int result = 1;
 
     tinyx_screen_config_init(&screen);
-    screen.width = 64;
-    screen.height = 64;
+    screen.framebuffer.width = 64;
+    screen.framebuffer.height = 64;
     tinyx_config_init(&config);
     config.initial_screen = &screen;
     if (tinyx_server_create(&config, &server, &error) != TINYX_OK)

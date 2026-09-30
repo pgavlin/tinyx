@@ -39,7 +39,8 @@ This produces:
 
 - `libtinyx.a`, the embeddable static library;
 - `tinyx-embed-example`, the native API example;
-- `tinyx-api-test` and `tinyx-embedded-font-data-test` when tests are enabled.
+- API, configured-visual, byte-order, keyboard-map, font, and retained-client
+  tests when testing is enabled.
 
 Useful options are:
 
@@ -56,6 +57,14 @@ cmake --install build/native --prefix /desired/prefix
 ```
 
 Installed CMake consumers can use the exported `TinyX::tinyx` target.
+
+The prerelease API supports creation-time ordered pixmap depths and exact X11
+visuals through `tinyx_depth_config` and `tinyx_visual_config`. A custom list is
+complete, must include the depth-1 bitmap format, and is copied during server
+creation. The presented root remains depth-24 TrueColor in 32-bpp storage;
+non-root depth 2 in 8 bpp and depth 12 in 16 bpp are supported for indexed
+colormaps, windows, pixmaps, GCs, and core drawing. The native and Emscripten
+`tinyx-visual-config` test exercises a big-endian client against this topology.
 
 ## Kitty terminal host
 
