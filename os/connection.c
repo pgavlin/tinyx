@@ -67,16 +67,17 @@ SOFTWARE.
 
 #include <X11/X.h>
 #include <X11/Xproto.h>
+#ifndef TINYX_MEMORY_ONLY
 #define XSERV_t
 #define TRANS_SERVER
 #define TRANS_REOPEN
 #include <X11/Xtrans/Xtrans.h>
 #include <errno.h>
 #include <signal.h>
+#include <sys/socket.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <sys/socket.h>
 
 
 
@@ -138,6 +139,7 @@ _X_EXPORT int GrabInProgress = 0;
 
 int *ConnectionTranslation = NULL;
 
+#ifndef TINYX_MEMORY_ONLY
 XtransConnInfo 	*ListenTransConns = NULL;
 int	       	*ListenTransFds = NULL;
 int		ListenTransCount;
@@ -157,12 +159,16 @@ lookup_trans_conn (int fd)
 
     return (NULL);
 }
+#endif
 
 /* Set MaxClients and lastfdesc, and allocate ConnectionTranslation */
 
 void
 InitConnectionLimits(void)
 {
+#ifdef TINYX_MEMORY_ONLY
+    lastfdesc = MAXCLIENTS;
+#else
     lastfdesc = -1;
 
 
@@ -189,6 +195,7 @@ InitConnectionLimits(void)
 
     if (lastfdesc > MAXSELECT)
 	lastfdesc = MAXSELECT;
+#endif
 
     if (lastfdesc > MAXCLIENTS)
     {
@@ -214,6 +221,17 @@ InitConnectionLimits(void)
 void
 CreateWellKnownSockets(void)
 {
+#ifdef TINYX_MEMORY_ONLY
+    int i;
+
+    FD_ZERO(&AllSockets);
+    FD_ZERO(&AllClients);
+    FD_ZERO(&LastSelectMask);
+    FD_ZERO(&ClientsWithInput);
+    FD_ZERO(&WellKnownConnections);
+    for (i = 0; i < MaxClients; i++)
+        ConnectionTranslation[i] = 0;
+#else
     int		i;
     int		partial;
     char 	port[20];
@@ -297,11 +315,15 @@ CreateWellKnownSockets(void)
 #ifdef XDMCP
     XdmcpInit ();
 #endif
+#endif
 }
 
 void
 ResetWellKnownSockets (void)
 {
+#ifdef TINYX_MEMORY_ONLY
+    ResetOsBuffers();
+#else
     int i;
 
     ResetOsBuffers();
@@ -356,17 +378,21 @@ ResetWellKnownSockets (void)
 #ifdef XDMCP
     XdmcpReset ();
 #endif
+#endif
 }
 
 void
 CloseWellKnownConnections(void)
 {
+#ifndef TINYX_MEMORY_ONLY
     int i;
 
     for (i = 0; i < ListenTransCount; i++)
 	_XSERVTransClose (ListenTransConns[i]);
+#endif
 }
 
+#ifndef TINYX_MEMORY_ONLY
 static void
 AuthAudit (ClientPtr client, Bool letin,
     struct sockaddr *saddr, int len,
@@ -442,6 +468,7 @@ AuthAudit (ClientPtr client, Bool letin,
 	       client->index, letin ? "connected" : "rejected", addr,
 	       client_uid_string);
 }
+#endif
 
 /*****************************************************************
  * ClientAuthorized
@@ -467,6 +494,16 @@ ClientAuthorized(ClientPtr client,
     unsigned int proto_n, char *auth_proto,
     unsigned int string_n, char *auth_string)
 {
+#ifdef TINYX_MEMORY_ONLY
+    OsCommPtr priv = (OsCommPtr)client->osPrivate;
+    (void)proto_n;
+    (void)auth_proto;
+    (void)string_n;
+    (void)auth_string;
+    priv->auth_id = 0;
+    priv->conn_time = 0;
+    return NULL;
+#else
     OsCommPtr 		priv;
     Xtransaddr		*from = NULL;
     int 		family;
@@ -536,11 +573,13 @@ ClientAuthorized(ClientPtr client,
      * access control list.
      */
     return((char *)NULL);
+#endif
 }
 
 ClientPtr
 AllocNewConnection(const TinyXTransportOps *ops, void *transportData,
-                   XtransConnInfo trans_conn, int fd, CARD32 conn_time)
+                   struct _XtransConnInfo *trans_conn, int fd,
+                   CARD32 conn_time)
 {
     OsCommPtr	oc;
     ClientPtr	client;
@@ -553,8 +592,10 @@ AllocNewConnection(const TinyXTransportOps *ops, void *transportData,
     oc->transportOps = ops;
     oc->transportData = transportData;
     oc->trans_conn = trans_conn;
+#ifndef TINYX_MEMORY_ONLY
     if (trans_conn && !ops)
         TinyXInitXtransTransport(oc, trans_conn);
+#endif
     oc->fd = fd;
     oc->auth_id = None;
     oc->conn_time = conn_time;
@@ -687,6 +728,11 @@ OsCommAppendReadyClients(int *ready, int nready)
 Bool
 EstablishNewConnections(ClientPtr clientUnused, pointer closure)
 {
+#ifdef TINYX_MEMORY_ONLY
+    (void)clientUnused;
+    (void)closure;
+    return TRUE;
+#else
     fd_set  readyconnections;     /* set of listeners that are ready */
     int curconn;                  /* fd of listener that's ready */
     int newconn;         /* fd of new client */
@@ -751,8 +797,10 @@ EstablishNewConnections(ClientPtr clientUnused, pointer closure)
       }
     }
     return TRUE;
+#endif
 }
 
+#ifndef TINYX_MEMORY_ONLY
 #define NOROOM "Maximum number of clients reached"
 
 /************
@@ -804,6 +852,7 @@ ErrorConnMax(XtransConnInfo trans_conn)
 	(void)_XSERVTransWritev(trans_conn, iov, 3);
     }
 }
+#endif
 
 /************
  *   CloseDownFileDescriptor:
@@ -850,6 +899,7 @@ CloseDownFileDescriptor(OsCommPtr oc)
 void
 CheckConnections(void)
 {
+#ifndef TINYX_MEMORY_ONLY
     fd_mask		mask;
     fd_set		tmask;
     int			curclient, curoff;
@@ -875,6 +925,7 @@ CheckConnections(void)
 	    mask &= ~((fd_mask)1 << curoff);
 	}
     }
+#endif
 }
 
 

@@ -9,6 +9,9 @@ Makefile.in
 *.a
 *.o
 *~
+/build/
+/build-cmake/
+/build-wasm*/
 aclocal.m4
 autom4te.cache
 ar-lib

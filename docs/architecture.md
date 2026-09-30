@@ -924,6 +924,30 @@ host supplies its own entry point without also pulling the native lifecycle
 driver. A configured custom host also skips Xtrans listener creation; native
 hosts retain it.
 
+### Sidecar build products
+
+The root `CMakeLists.txt` assembles explicit source manifests into
+`tinyx-core` and `tinyx-host-memory` object targets, then combines them into
+the installed `libtinyx.a`. Object targets avoid imposing artificial archive
+link-order boundaries on the legacy callback graph. The native example and API
+tests link the same static product used by embedders.
+
+Under Emscripten, the manifest replaces native access control and
+authorization with the trusted in-process policy in
+`os/embedded-security.c`. It also excludes Xtrans, XDMCP, MIT-SHM,
+XF86BIGFONT, Linux device acquisition, fbdev, and VESA. `TINYX_MEMORY_ONLY`
+removes descriptor listener and Xtrans-adapter code while retaining generic
+client bookkeeping and protocol buffering. The WASM configuration disables
+the signal-driven smart scheduler in favor of bounded cooperative steps.
+`tinyx-wasm.js` and
+`tinyx-wasm.wasm` expose the public v1 functions through the explicit list in
+`cmake/wasm-exports.json`.
+
+CMake generates target-specific DIX and KDrive configuration headers rather
+than reusing host Autoconf output or native `pkg-config` link results. The
+external xorgproto dependency is headers-only. Autotools remains the reference
+build for native hardware executables and legacy host behavior.
+
 ### Shadow framebuffers
 
 `miext/shadow/` supports rendering into shadow memory and copying transformed

@@ -91,7 +91,9 @@ DamageExtNotify(DamageExtPtr pDamageExt, BoxPtr pBoxes, int nBoxes)
     /* Composite extension marks clients with manual Subwindows as critical */
     if (pDamageClient->critical > 0) {
         SetCriticalOutputPending();
+#ifdef SMART_SCHEDULE
         pClient->smart_priority = SMART_MAX_PRIORITY;
+#endif
     }
 }
 

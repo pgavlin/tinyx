@@ -335,6 +335,13 @@ void KdEnableInput(void)
 	KdUnblockSigio();
 }
 
+static void
+KdMouseCtrl(DeviceIntPtr pDevice, PtrCtrl *ctrl)
+{
+    (void)pDevice;
+    (void)ctrl;
+}
+
 static int KdMouseProc(DeviceIntPtr pDevice, int onoff)
 {
 	BYTE map[KD_MAX_BUTTON];
@@ -352,7 +359,7 @@ static int KdMouseProc(DeviceIntPtr pDevice, int onoff)
 			map[i] = i;
 		InitPointerDeviceStruct(pDev, map, kdMouseButtonCount,
 					miPointerGetMotionEvents,
-					(PtrCtrlProcPtr) NoopDDA,
+					KdMouseCtrl,
 					miPointerGetMotionBufferSize());
 		break;
 

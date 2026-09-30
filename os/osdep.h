@@ -96,7 +96,7 @@ SOFTWARE.
 /* MAXSELECT is the number of fds that select() can handle */
 #define MAXSELECT (sizeof(fd_set) * NBBY)
 
-#ifndef HAS_GETDTABLESIZE
+#if !defined(HAS_GETDTABLESIZE) && !defined(TINYX_MEMORY_ONLY)
 #define HAS_GETDTABLESIZE
 #endif
 

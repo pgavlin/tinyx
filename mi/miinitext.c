@@ -71,7 +71,9 @@ extern Bool noDPMSExtension;
 #ifdef SCREENSAVER
 extern Bool noScreenSaverExtension;
 #endif
+#ifndef TINYX_NO_MITSHM
 extern Bool noMITShmExtension;
+#endif
 extern Bool noRRExtension;
 extern Bool noRenderExtension;
 extern Bool noShapeExtension;
@@ -98,7 +100,9 @@ typedef void (*InitExtension)(INITARGS);
 #endif
 
 /* FIXME: this whole block of externs should be from the appropriate headers */
+#ifndef TINYX_NO_MITSHM
 extern void ShmExtensionInit(INITARGS);
+#endif
 extern void XTestExtensionInit(INITARGS);
 extern void BigReqExtensionInit(INITARGS);
 #ifdef SCREENSAVER
@@ -145,7 +149,9 @@ static const ExtensionToggle ExtensionToggleList[] =
 #ifdef SCREENSAVER
     { "MIT-SCREEN-SAVER", &noScreenSaverExtension },
 #endif
+#ifndef TINYX_NO_MITSHM
     { SHMNAME, &noMITShmExtension },
+#endif
     { "RANDR", &noRRExtension },
     { "RENDER", &noRenderExtension },
     { "SHAPE", &noShapeExtension },
@@ -195,7 +201,9 @@ InitExtensions(argc, argv)
     char	*argv[];
 {
     if (!noShapeExtension) ShapeExtensionInit();
+#ifndef TINYX_NO_MITSHM
     if (!noMITShmExtension) ShmExtensionInit();
+#endif
     if (!noTestExtensions) XTestExtensionInit();
     if (!noBigReqExtension) BigReqExtensionInit();
 #if defined(SCREENSAVER) && !defined(PRINT_ONLY_SERVER)

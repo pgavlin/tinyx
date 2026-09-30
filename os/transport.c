@@ -2,11 +2,13 @@
 #include <dix-config.h>
 #endif
 
+#ifndef TINYX_MEMORY_ONLY
 #include <errno.h>
 #define XSERV_t
 #define TRANS_SERVER
 #define TRANS_REOPEN
 #include <X11/Xtrans/Xtrans.h>
+#endif
 #include <X11/X.h>
 
 #include "misc.h"
@@ -14,6 +16,7 @@
 #include "osdep.h"
 #include "transport.h"
 
+#ifndef TINYX_MEMORY_ONLY
 #if defined(EAGAIN) && defined(EWOULDBLOCK)
 #define WOULD_BLOCK(err) ((err) == EAGAIN || (err) == EWOULDBLOCK)
 #elif defined(EAGAIN)
@@ -68,6 +71,7 @@ static const TinyXTransportOps xtransOps = {
     XtransWrite,
     XtransClose
 };
+#endif
 
 TinyXTransportResult
 TinyXTransportRead(OsCommPtr oc, void *buffer, size_t size, size_t *count)
@@ -94,6 +98,7 @@ TinyXTransportClose(OsCommPtr oc)
     oc->trans_conn = NULL;
 }
 
+#ifndef TINYX_MEMORY_ONLY
 void
 TinyXInitXtransTransport(OsCommPtr oc, XtransConnInfo connection)
 {
@@ -103,3 +108,4 @@ TinyXInitXtransTransport(OsCommPtr oc, XtransConnInfo connection)
     /* Retained for native authorization and access-control code. */
     oc->trans_conn = connection;
 }
+#endif

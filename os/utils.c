@@ -59,10 +59,12 @@ OR PERFORMANCE OF THIS SOFTWARE.
 #include <time.h>
 #include "misc.h"
 #include <X11/X.h>
+#ifndef TINYX_MEMORY_ONLY
 #define XSERV_t
 #define TRANS_SERVER
 #define TRANS_REOPEN
 #include <X11/Xtrans/Xtrans.h>
+#endif
 #include "input.h"
 #include "dixfont.h"
 #include "osdep.h"
@@ -702,9 +704,11 @@ ProcessCommandLine(int argc, char *argv[])
 	else if ( strcmp( argv[i], "-nolisten") == 0)
 	{
             if(++i < argc) {
+#ifndef TINYX_MEMORY_ONLY
 		if (_XSERVTransNoListen(argv[i]))
 		    FatalError ("Failed to disable listen for %s transport",
 				argv[i]);
+#endif
 	   } else
 		UseMsg();
 	}
@@ -885,8 +889,10 @@ ProcessCommandLine(int argc, char *argv[])
         }
     }
 
+#ifndef TINYX_MEMORY_ONLY
     if (!tcp)
 	_XSERVTransNoListen("tcp");
+#endif
 }
 
 

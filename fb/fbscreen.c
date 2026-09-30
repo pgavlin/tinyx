@@ -90,6 +90,20 @@ _fbSetWindowPixmap(WindowPtr pWindow, PixmapPtr pPixmap)
     pWindow->devPrivates[fbWinPrivateIndex].ptr = (pointer) pPixmap;
 }
 
+static void
+fbDestroyColormapNoop(ColormapPtr pmap)
+{
+    (void)pmap;
+}
+
+static void
+fbStoreColorsNoop(ColormapPtr pmap, int count, xColorItem *items)
+{
+    (void)pmap;
+    (void)count;
+    (void)items;
+}
+
 Bool
 fbSetupScreen(ScreenPtr pScreen, pointer pbits, /* pointer to screen bitmap */
               int xsize,        /* in pixels */
@@ -121,11 +135,11 @@ fbSetupScreen(ScreenPtr pScreen, pointer pbits, /* pointer to screen bitmap */
     pScreen->UnrealizeFont = fbUnrealizeFont;
     pScreen->CreateGC = fbCreateGC;
     pScreen->CreateColormap = fbInitializeColormap;
-    pScreen->DestroyColormap = (void (*)(ColormapPtr)) NoopDDA;
+    pScreen->DestroyColormap = fbDestroyColormapNoop;
     pScreen->InstallColormap = fbInstallColormap;
     pScreen->UninstallColormap = fbUninstallColormap;
     pScreen->ListInstalledColormaps = fbListInstalledColormaps;
-    pScreen->StoreColors = (void (*)(ColormapPtr, int, xColorItem *)) NoopDDA;
+    pScreen->StoreColors = fbStoreColorsNoop;
     pScreen->ResolveColor = fbResolveColor;
     pScreen->BitmapToRegion = fbPixmapToRegion;
 

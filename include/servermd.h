@@ -121,6 +121,16 @@ SOFTWARE.
  */
 
 
+#if defined(__wasm32__) || defined(__wasm64__)
+
+#define IMAGE_BYTE_ORDER        LSBFirst
+#define BITMAP_BIT_ORDER        LSBFirst
+#define GLYPHPADBYTES           4
+#define GETLEFTBITS_ALIGNMENT   1
+#define LARGE_INSTRUCTION_CACHE
+
+#endif /* WebAssembly */
+
 #if defined(__arm32__) || defined(__aarch64__) || defined(__arm64__)
 
 #define IMAGE_BYTE_ORDER        LSBFirst

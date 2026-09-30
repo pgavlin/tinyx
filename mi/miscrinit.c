@@ -238,7 +238,9 @@ miScreenInit(pScreen, pbits, xsize, ysize, dpix, dpiy, width,
     pScreen->visuals = visuals;
     if (width)
     {
+#ifndef TINYX_NO_MITSHM
 	ShmRegisterFbFuncs(pScreen);
+#endif
 	pScreen->CloseScreen = miCloseScreen;
     }
     /* else CloseScreen */

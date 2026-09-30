@@ -51,6 +51,9 @@ protocol semantics and server state.
   lifecycle, bounded stepping, finite client streams, framebuffer and damage,
   input injection, host callbacks, and protected fatal-error policy without
   exposing server internals.
+- **Phase 9 complete:** a sidecar CMake build produces and tests the native
+  static library and an explicitly exported Emscripten module while retaining
+  Autotools as the native reference build.
 
 ## Guiding principles
 
@@ -528,6 +531,30 @@ The new build should:
 
 The existing Autotools build should remain as a reference until the new build
 has equivalent coverage for the intended native targets.
+
+### Implemented
+
+The root `CMakeLists.txt` maintains explicit subsystem source manifests.
+`tinyx-core` and `tinyx-host-memory` object targets are combined into the
+installed `libtinyx.a`, avoiding legacy static-archive ordering problems. The
+native embedding example and the API/font tests link this library. Generated
+CMake configuration headers select the embedded font backend and memory KDrive
+without consuming Autotools output.
+
+The Emscripten product emits modularized `tinyx-wasm.js` and
+`tinyx-wasm.wasm`. `cmake/wasm-exports.json` is the deliberate C export list.
+The WASM manifest has no Xtrans, native authorization/access implementation,
+XDMCP, MIT-SHM, XF86BIGFONT, Linux input, fbdev, or VESA sources. A small
+trusted in-process security policy supplies the core protocol hooks, and
+`TINYX_MEMORY_ONLY` removes descriptor listener and Xtrans adapter code. The
+WASM configuration also disables the signal-driven smart scheduler; bounded
+cooperative stepping supplies scheduling instead.
+Xorgproto remains a headers-only input and no native `pkg-config` result is
+used while cross-compiling.
+
+CTest runs the existing API integration and embedded-font tests both natively
+and under Node/Emscripten. Autotools remains available and validated for the
+historical native products.
 
 ## Validation strategy
 
