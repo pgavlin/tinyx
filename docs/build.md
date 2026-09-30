@@ -72,7 +72,8 @@ DISPLAY=:99 xclock
 
 The default display is `:99`. See `embedders/kitty/README.md` for socket, log,
 and dependency configuration. This development host trusts clients admitted
-through its local socket.
+through its local socket. The native window-manager bring-up and compatibility
+test plan is documented in [Running dwm on TinyX](dwm-integration-plan.md).
 
 ## Emscripten build
 
