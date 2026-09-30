@@ -1,17 +1,16 @@
 # Building TinyX
 
-TinyX retains Autotools for the historical native servers and provides a
-sidecar CMake build for the embeddable memory host. The two builds intentionally
-coexist while the CMake source/configuration manifests are validated against
-the native reference build.
+TinyX uses CMake for its native embeddable library, tests, examples, and
+Emscripten module. The source manifests are explicit in the root
+`CMakeLists.txt`.
 
 ## Dependencies
 
-Both builds require a C99 compiler and X.Org protocol headers (`xorgproto`).
+All builds require a C99 compiler and X.Org protocol headers (`xorgproto`).
 These headers describe the wire protocol and are not linked libraries.
 
-The CMake native build also requires Xtrans headers because it retains the
-native socket adapter. The Emscripten build does not use Xtrans, libXfont,
+The native build also requires Xtrans headers because it retains the native
+socket adapter. The Emscripten build does not use Xtrans, libXfont,
 libfontenc, libXdmcp, native authorization, hardware backends, or native
 `pkg-config` results.
 
@@ -22,10 +21,10 @@ If CMake cannot locate headers automatically, set:
 -DTINYX_XTRANS_INCLUDE_DIR=/path/to/xtrans/include # native only
 ```
 
-## Native CMake build
+## Native build
 
-The default CMake product uses the memory display, embedded fonts, in-memory
-clients, and public API from `include/tinyx.h`:
+The default product uses the memory display, embedded fonts, in-memory clients,
+and public API from `include/tinyx.h`:
 
 ```sh
 cmake -S . -B build/native -G Ninja \
@@ -69,9 +68,9 @@ colormaps, windows, pixmaps, GCs, and core drawing. The native and Emscripten
 ## Kitty terminal host
 
 `embedders/kitty` is a Rust reference host for the public C API. Its Cargo
-build invokes the sidecar CMake build, listens for ordinary X11 clients on a
-Unix-domain socket, presents framebuffer damage with the Kitty graphics
-protocol, and injects terminal keyboard and mouse input:
+build invokes CMake, listens for ordinary X11 clients on a Unix-domain socket,
+presents framebuffer damage with the Kitty graphics protocol, and injects
+terminal keyboard and mouse input:
 
 ```sh
 cargo run --manifest-path embedders/kitty/Cargo.toml --release
@@ -99,7 +98,7 @@ ctest --test-dir build/wasm --output-on-failure
 ```
 
 The result is `tinyx-wasm.js` plus `tinyx-wasm.wasm`. The JavaScript file is a
-modularized factory named `createTinyXModule`. The module exports only the v1
+modularized factory named `createTinyXModule`. The module exports only the
 TinyX API, `malloc`, and `free`; the explicit list is maintained in
 `cmake/wasm-exports.json`. `addFunction`, `removeFunction`, and `HEAPU8` are
 available to install host callbacks and inspect API buffers.
@@ -109,45 +108,21 @@ authorization, XDMCP, MIT-SHM, XF86BIGFONT, Linux input, fbdev, and VESA. It
 also disables the native signal-driven scheduler. Logical clients use the
 in-memory transport and the memory display performs no presentation.
 
-CTest runs the same API integration and embedded-font tests under Node through
-Emscripten's cross-compiling emulator. This checks complete server startup,
-the X11 setup handshake, bounded client streams, and shutdown inside WASM.
+CTest runs the same API and protocol tests under Node through Emscripten's
+cross-compiling emulator.
 
 ## Generated configuration
 
 CMake generates `dix-config.h` and `kdrive-config.h` in its build directory
 from `cmake/*.in`. It performs compile-time target checks through the selected
 CMake toolchain and uses explicit embedded-product policy for extensions and
-host services. It never imports an Autotools-generated host configuration.
+host services.
 
 `xorgproto` is currently supplied as an external header tree. Pinning or
 vendoring it can be added later for fully hermetic builds.
 
-## Autotools reference build
+## Product scope
 
-The native build normally uses legacy libXfont 1 and libfontenc:
-
-```sh
-./autogen.sh
-./configure
-make
-make check
-```
-
-A filesystem-free build uses TinyX's embedded bitmap backend:
-
-```sh
-./configure --disable-fonts [other options]
-make
-make check
-```
-
-Despite the historical option name, this configuration has working font
-support. It registers a `built-ins` font-path element containing the X.Org
-complete 4,121-glyph ISO10646-1 6x13 `fixed` font and complete cursor font,
-and links neither libXfont nor libfontenc. Supported aliases and generated-data provenance are documented in
-[`fonts/README.md`](../fonts/README.md).
-
-The Autotools build remains the reference for `Xfbdev`, `Xvesa`, native Xtrans
-listeners, filesystem fonts, and other historical host features. Those native
-products are deliberately not duplicated by the Phase 9 CMake build.
+The supported product is the embeddable memory-display server. Historical
+fbdev, VESA, Linux-console, filesystem-font, and standalone native-server
+sources remain in the tree for reference but are not CMake products.

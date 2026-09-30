@@ -132,86 +132,36 @@ structures and interfaces used across these components.
 
 ### Compile and link dependency graph
 
-TinyX does **not** compile every source file as one translation unit. Automake
-compiles each `.c` file separately, then groups the resulting objects into
-internal archives. Most subsystems use Libtool convenience libraries (`.la`),
-while KDrive and its hardware and host backends use ordinary static archives
-(`.a`). `AC_DISABLE_SHARED` disables shared-library output, and none of these
-internal libraries is installed.
-
-The subsystem archives do not link to one another when they are created.
-Instead, `configure.ac` flattens them into `KDRIVE_LIBS`, and the final
-`Xfbdev` or `Xvesa` link resolves references across the complete ordered list.
-The following graph shows that final link order. Follow either frontend path
-from top to bottom; the two paths share everything beginning with `libdix.la`.
+CMake compiles each `.c` file separately into two object targets:
+`tinyx-core` contains DIX, MI, FB, extensions, Damage, shadow, and generic OS
+code; `tinyx-host-memory` contains KDrive's shared machinery and the memory
+host. Their objects are combined into the installed `libtinyx.a`.
 
 ```mermaid
 flowchart TD
-    fbinit["`**Xfbdev frontend**<br/>fbinit.o`"] --> fbdev["`**Display backend**<br/>libfbdev.a`"]
-    vesainit["`**Xvesa frontend**<br/>vesainit.o`"] --> vesa["`**Display backend**<br/>libvesa.a`"]
-
-    fbdev --> dix["`**1. Core and entry point**<br/>libdix.la`"]
-    vesa --> dix
-    dix --> kdrive["`**2. KDrive framework**<br/>libkdrive.a`"]
-    kdrive --> linux["`**3. Native KDrive host**<br/>liblinux.a`"]
-    linux --> fb["`**4. Framebuffer renderer**<br/>libfb.la`"]
-    fb --> mi["`**5. Machine-independent algorithms**<br/>libmi.la`"]
-    mi --> extensions["`**6–13. Extensions**<br/>libxfixes, libXext, optional libdbe, librender, librandr, libdamageext, libdamage, libshadow`"]
-    extensions --> os["`**14. Native OS and transport**<br/>libos.la`"]
-    os --> stubs["`**15. KDrive fallback symbols**<br/>libkdrivestubs.a`"]
-    stubs --> external["`**External libraries**<br/>libXfont, libfontenc, system libraries, libm`"]
-    external --> executable(["Xfbdev or Xvesa"])
+    api["`**Public API**<br/>include/tinyx.h`"] --> memory["`**tinyx-host-memory**<br/>memory display, input, facade`"]
+    memory --> core["`**tinyx-core**<br/>DIX, MI, FB, extensions, OS services`"]
+    core --> library["`**libtinyx.a**`"]
+    memory --> library
+    library --> native["`Native embedders and tests`"]
+    library --> wasm["`Emscripten module`"]
 
     classDef prose text-align:left
-    class fbinit,fbdev,vesainit,vesa,dix,kdrive,linux,fb,mi,extensions,os,stubs,external,executable prose
+    class api,memory,core,library,native,wasm prose
 ```
 
-The numbered part is the value of `KDRIVE_LIBS` assembled in `configure.ac`:
+Object targets avoid imposing artificial static-archive ordering on the
+legacy callback graph. The source still uses callbacks, wrappers, required
+global symbols, and shared globals in both directions: DIX calls through
+`ScreenRec`, while FB, MI, KDrive, and extensions call services back in DIX.
+The two CMake targets are therefore product/source boundaries, not a strict
+semantic dependency DAG.
 
-```text
-libdix.la
-libkdrive.a
-liblinux.a
-libfb.la
-libmi.la
-libxfixes.la
-libXext.la
-libdbe.la             (when DBE is enabled)
-librender.la
-librandr.la
-libdamageext.la
-libdamage.la
-libshadow.la
-libos.la
-libkdrivestubs.a
-```
-
-This ordering is significant for a traditional static linker: a library that
-contains unresolved references generally appears before the library expected
-to satisfy them. For example, `libdix.la` contains `main()` and references DDX
-and OS functions supplied later, while the selected frontend object supplies
-`InitOutput()`, `InitInput()`, and other DDX hooks before `libdix.la` is
-searched. `libkdrivestubs.a` deliberately comes near the end to provide
-fallback implementations only when no earlier archive supplied them.
-
-This graph is a **link graph**, not a clean semantic dependency DAG. The code
-uses callbacks, wrappers, required global symbols, and shared globals in both
-directions. DIX calls down through `ScreenRec`, while FB, MI, KDrive, and
-extensions also call services back in DIX. The archive order is therefore a
-better description of how the present build is assembled than a claim that
-each source directory forms a strictly lower layer.
-
-When the compiler accepts `-flto`, `configure` enables link-time optimization.
-The source files are still compiled separately and placed in the archives;
-the final link may then optimize the selected LTO objects as a whole program.
-Without LTO, the same archive structure and ordering remain in effect.
-
-For an archive-by-archive account of these layers and the external packages
-they pull in, see [TinyX, Layer by Layer](layers.md). For a source-level
-dependency graph and an analysis of the input, display, and protocol seams,
-see [Finding the Embedding Boundaries](embedding-boundaries.md). The
-mechanically generated object and archive dependency reports are documented in
-[Auditing TinyX Symbol Dependencies](symbol-dependencies.md).
+The Emscripten manifest excludes native transports, authorization, shared
+memory, Linux input, and hardware display backends. Generated target-specific
+configuration headers make those choices explicit. For a source-level
+dependency graph and analysis of the host seams, see
+[Finding the Embedding Boundaries](embedding-boundaries.md).
 
 ## 4. The central object model
 
@@ -938,11 +888,9 @@ without server internals.
 the public header, and `api-test.c` drives an X11 setup handshake through the
 facade.
 
-The native process entry point now occupies its own `libdix` archive member.
-Native executables pull that member to obtain `main()`, whereas an embedded
-host supplies its own entry point without also pulling the native lifecycle
-driver. A configured custom host also skips Xtrans listener creation; native
-hosts retain it.
+The legacy process entry point occupies its own `libtinyx.a` archive member.
+A host supplies its own entry point without pulling the native lifecycle
+driver. A configured custom host also skips Xtrans listener creation.
 
 `embedders/kitty/` is a complete Rust host over this facade. It adapts a
 nonblocking Unix-domain socket to descriptor-free TinyX clients, consumes
@@ -960,7 +908,7 @@ stock-st and stock-dwm validation covers this host, Xft/Render, selections,
 core window-manager behavior, input, and resizing, as recorded in
 [Running st and dwm on TinyX](dwm-integration-plan.md).
 
-### Sidecar build products
+### CMake build products
 
 The root `CMakeLists.txt` assembles explicit source manifests into
 `tinyx-core` and `tinyx-host-memory` object targets, then combines them into
@@ -979,14 +927,14 @@ the signal-driven smart scheduler in favor of bounded cooperative steps.
 `tinyx-wasm.wasm` expose the public v1 functions through the explicit list in
 `cmake/wasm-exports.json`.
 
-CMake generates target-specific DIX and KDrive configuration headers rather
-than reusing host Autoconf output or native `pkg-config` link results. KDrive
-translation units include `kdrive-config.h`, which in turn includes
+CMake generates target-specific DIX and KDrive configuration headers without
+consuming host-generated configuration or native `pkg-config` link results.
+KDrive translation units include `kdrive-config.h`, which in turn includes
 `dix-config.h`; this is required on 64-bit hosts so every subsystem uses the
 server's 32-bit `XID` and `KeySym` definitions. Keyboard mappings are converted
 explicitly between internal `KeySym` values and 32-bit wire values. The
-external xorgproto dependency is headers-only. Autotools remains the reference
-build for native hardware executables and legacy host behavior.
+external xorgproto dependency is headers-only. CMake is the sole supported
+build; native hardware sources remain only as unbuilt historical reference.
 
 ### Shadow framebuffers
 
@@ -1040,12 +988,11 @@ Fonts cross several layers:
 - screen callbacks realize and unrealize fonts;
 - GC text operations eventually invoke glyph rendering in FB or MI.
 
-The default native build uses libXfont's filesystem backend and preserves its
-configured directory paths. The `--disable-fonts` build instead registers the
-host-independent `built-ins` FPE in `dix/embedded-font.c`. Its internal catalog
-serves checked-in, development-time-generated 6x13 and cursor data. The 6x13
-font includes its complete 4,121-glyph BMP repertoire and both ISO10646-1 and
-historical ISO8859-1 names. An acquire/release lease separates catalog
+The supported CMake products register the host-independent `built-ins` FPE in
+`dix/embedded-font.c` and link neither libXfont nor libfontenc. Its internal
+catalog serves checked-in, development-time-generated 6x13 and cursor data.
+The 6x13 font includes its complete 4,121-glyph BMP repertoire and both
+ISO10646-1 and historical ISO8859-1 names. An acquire/release lease separates catalog
 ownership from conversion into an
 ordinary `FontRec`, so a later embedding provider can reuse the materializer
 without exposing DIX structures. Phase 7 intentionally exposes only the

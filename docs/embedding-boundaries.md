@@ -1,12 +1,11 @@
 # Finding the Embedding Boundaries
 
-This document maps TinyX's current source dependencies onto the interfaces an
-embeddable server needs. It complements the [architecture tour](architecture.md)
-and the [archive-by-archive guide](layers.md).
+This document maps TinyX's source dependencies onto the interfaces an
+embeddable server needs. It complements the [architecture tour](architecture.md).
 
-The link order alone cannot identify these boundaries. It tells the static
-linker when archives are searched, but TinyX has calls, callbacks, and globals
-that cross that order in both directions. The useful question is instead:
+Build-target boundaries alone cannot identify these interfaces. TinyX has
+calls, callbacks, and globals that cross them in both directions. The useful
+question is instead:
 
 > Which code implements X server semantics, and which code acquires or
 > presents data on behalf of a particular host?
@@ -534,11 +533,10 @@ X-server structures can remain implementation details.
    path from both Linux and an explicit injection API.
 7. **Move remaining process policy behind host hooks.** Address time, logging,
    fatal errors, fonts, and authorization.
-8. **Audit archive dependencies after `main()` moves.** Use the
-   [symbol dependency tooling](symbol-dependencies.md) on non-LTO builds to
-   identify unresolved cross-archive references; do not rely on the old
-   executable's archive extraction closure.
+8. **Audit dependencies after `main()` moves.** Inspect object symbols and
+   final links to identify unresolved cross-component references rather than
+   relying on archive extraction side effects.
 
-The key architectural test is that both the native executable and the WASM or
-application host use the same lifecycle, protocol, rendering, and input core.
+The key architectural test is that native and WASM application hosts use the
+same lifecycle, protocol, rendering, and input core.
 Only acquisition, presentation, transport, and host policy should differ.

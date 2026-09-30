@@ -338,9 +338,8 @@ report:
 9. **Manual desktop test:** run stock dwm with st, xterm, and xclock through the
    Kitty socket and record the tested host versions and configuration.
 
-Protocol tests should run in native CMake, Emscripten/Node where applicable,
-and the Autotools embedded-font build. The actual dwm process and Kitty
-presentation test is native-only.
+Protocol tests should run in native CMake and Emscripten/Node where applicable.
+The actual dwm process and Kitty presentation test is native-only.
 
 ## Failure diagnosis
 

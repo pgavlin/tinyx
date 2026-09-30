@@ -606,7 +606,7 @@ Through a descriptor-free client:
 - verify metrics and damaged pixels against expected fixture data;
 - request an unknown name without invoking the provider and retain `BadName`;
 - supply malformed provider bytes and retain ordinary X11 failure semantics;
-- repeat under native CMake, Emscripten/Node, and Autotools builds.
+- repeat under native CMake and Emscripten/Node builds.
 
 ## Implementation slices
 

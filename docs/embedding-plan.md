@@ -5,10 +5,9 @@
 Refactor TinyX in place into a host-independent server core that can eventually
 be exposed as a static library or WASM module.
 
-The architectural refactor and build-system migration are separate projects.
-The first phase will continue to use the existing Autotools build and preserve
-the current native executables as reference hosts. CMake or Meson can be added
-after the component boundaries and source sets are known.
+The architectural refactor preceded the build-system migration. CMake is now
+the sole build system and produces the native embeddable library, tests,
+examples, and Emscripten module from explicit source manifests.
 
 The intended dependency direction is:
 
@@ -55,9 +54,9 @@ protocol semantics and server state.
   lifecycle, bounded stepping, finite client streams, framebuffer and damage,
   input injection, host callbacks, and protected fatal-error policy without
   exposing server internals.
-- **Phase 9 complete:** a sidecar CMake build produces and tests the native
-  static library and an explicitly exported Emscripten module while retaining
-  Autotools as the native reference build.
+- **Phase 9 complete:** CMake produces and tests the native static library and
+  an explicitly exported Emscripten module. After this build became
+  authoritative, the obsolete Autotools build was removed.
 - **Host font loading designed:** `docs/font-provider-design.md` specifies an
   immutable creation-time font manifest with synchronous, lazy BDF/PCF
   acquisition through a constrained host provider; implementation remains
@@ -76,8 +75,8 @@ protocol semantics and server state.
    state and supporting concurrent instances is a separate project.
 5. **Keep the public API small.** Establish and test internal seams before
    freezing public names, ownership rules, and error behavior.
-6. **Do not migrate the build first.** Update the existing Automake manifests
-   as necessary, but defer a new build system until the architecture settles.
+6. **Migrate after establishing boundaries.** The architecture was separated
+   before CMake became authoritative, keeping source-product decisions explicit.
 7. **Validate boundaries with working hosts.** A boundary is not complete until
    both the existing native implementation and a host-neutral implementation
    exercise it.
@@ -104,8 +103,7 @@ The following are not initial goals:
 - thread safety;
 - full parity with every native extension;
 - MIT-SHM, XDMCP, native authorization, DPMS, fbdev, or VESA in WASM;
-- replacing DIX, MI, FB, or the X11 protocol implementation;
-- replacing Autotools during the architectural phase.
+- replacing DIX, MI, FB, or the X11 protocol implementation.
 
 ## Phase 1: Extract the server lifecycle
 
@@ -452,11 +450,10 @@ repertoire. Listing, querying, text rendering, and glyph cursor creation use
 the existing DIX and FB paths; unknown names and paths retain X11 error
 semantics.
 
-`--disable-fonts` now selects this runnable backend, defaults the font path to
-`built-ins`, and links neither libXfont nor libfontenc. The default build keeps
-legacy libXfont filesystem behavior for native compatibility. The Automake
-check validates generated encoding maps, bitmap bounds, required aliases, and
-the complete 154-glyph cursor set.
+The CMake products select this runnable backend, default the font path to
+`built-ins`, and link neither libXfont nor libfontenc. CTest validates generated
+encoding maps, bitmap bounds, required aliases, and the complete 154-glyph
+cursor set.
 
 ## Phase 8: Define the public embedding API
 
@@ -520,8 +517,8 @@ own entry point without a duplicate symbol.
 
 ## Phase 9: Add build and host products
 
-Once the source boundaries are established, add a sidecar CMake or Meson build
-rather than immediately deleting Autotools. Expected conceptual targets are:
+Once the source boundaries are established, add a CMake build with conceptual
+targets equivalent to:
 
 ```text
 tinyx-core
@@ -541,8 +538,8 @@ The new build should:
 - exclude native sockets, signals, hardware, and authorization from WASM;
 - avoid relying on native `pkg-config` results during cross-compilation.
 
-The existing Autotools build should remain as a reference until the new build
-has equivalent coverage for the intended native targets.
+CMake becomes authoritative after it has equivalent coverage for the intended
+embedded native and WASM targets.
 
 ### Implemented
 
@@ -550,8 +547,7 @@ The root `CMakeLists.txt` maintains explicit subsystem source manifests.
 `tinyx-core` and `tinyx-host-memory` object targets are combined into the
 installed `libtinyx.a`, avoiding legacy static-archive ordering problems. The
 native embedding example and the API/font tests link this library. Generated
-CMake configuration headers select the embedded font backend and memory KDrive
-without consuming Autotools output.
+CMake configuration headers select the embedded font backend and memory KDrive.
 
 The Emscripten product emits modularized `tinyx-wasm.js` and
 `tinyx-wasm.wasm`. `cmake/wasm-exports.json` is the deliberate C export list.
@@ -564,9 +560,9 @@ cooperative stepping supplies scheduling instead.
 Xorgproto remains a headers-only input and no native `pkg-config` result is
 used while cross-compiling.
 
-CTest runs the existing API integration and embedded-font tests both natively
-and under Node/Emscripten. Autotools remains available and validated for the
-historical native products.
+CTest runs the API, protocol, and embedded-font tests both natively and under
+Node/Emscripten. CMake is the sole supported build; historical hardware-host
+sources are retained only as unbuilt reference code.
 
 ## Validation strategy
 

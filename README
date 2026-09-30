@@ -1,52 +1,38 @@
-Necromancy
-==========
+TinyX
+=====
 
-We resurrected Xvesa from the depths of git history, and intend to maintain it with Xfbdev.
+TinyX is an embeddable X11 server core derived from the traditional
+DIX/MI/FB/KDrive server architecture. It provides:
 
-This includes bugfixes, security fixes, and occasional new features if required.
+- a static C library with a small host-facing API in `include/tinyx.h`;
+- a memory-backed depth-24/32-bpp framebuffer with Damage reporting;
+- descriptor-free X11 client byte streams;
+- cooperative, bounded server stepping;
+- pointer and keyboard injection;
+- runtime resize, host-controlled DPI, and configurable X11 visuals;
+- built-in filesystem-free bitmap text and cursor fonts;
+- native and Emscripten CMake products;
+- a Rust reference host for the Kitty terminal graphics protocol.
 
+Build
+-----
 
-Why?
-----
+    cmake -S . -B build/native -G Ninja
+    cmake --build build/native
+    ctest --test-dir build/native --output-on-failure
 
-The TinyX servers fill our needs while being a lot smaller than Xorg can be made.
+The build requires X.Org protocol headers. Native builds also require Xtrans
+headers. See `docs/build.md` for dependency overrides, installation,
+Emscripten instructions, and the Kitty host.
 
+Scope
+-----
 
-Why 1.2.0 and not 1.3.0?
-------------------------
-
-As you know, Xvesa was killed in 1.4.0, so the latest released version would be 1.3.0.
-However, they broke all input in 1.3.0 (keyboard and mouse), so the last working released 
-version is 1.2.0.
-
-There were also some changes later on that we disagree with (mandatory xinput & xkb).
-
-
-Design choices
---------------
-
-We aim for the smallest fully featured X server binary. Currently there are the vesa and 
-fbdev servers, but others may appear in the future (Xmodesetting?).
-
-- no xkb; it's bloat when console keymaps suffice
-- no xinput
-- no xinerama
-- no gl
-- TCP listening disabled by default, shadow FB enabled by default
-...
-
+The supported product is the embeddable memory-display server. Hardware and
+legacy native-host sources inherited from the original TinyX tree remain for
+reference but are not built.
 
 Licensing
 ---------
 
-While the original codebase is MIT, any changes here are GPLv3. Supporting closed devices
-with this code is not a goal.
-
-Links
------
-
-There's a similar tinyX fork from the Puppy folks:
-https://github.com/idunham/tinyxserver
-
-In case you can't find the sources for libXfont ver 1 or other libs:
-https://www.x.org/archive/individual/lib/
+See `COPYING` and individual source-file notices.

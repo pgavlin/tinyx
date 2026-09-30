@@ -48,8 +48,7 @@ A better architecture is:
 ### Suggested implementation order
 
 1. **Create a separate WASM build**
-   - Don’t initially force Autotools to understand WASM.
-   - Make an explicit CMake/Meson source list or an `emcc` response file.
+   - Use an explicit CMake source list and Emscripten toolchain.
    - Disable most extensions and all Linux/VESA/fbdev code.
 
 2. **Make dispatch cooperative**

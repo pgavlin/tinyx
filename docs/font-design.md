@@ -17,7 +17,7 @@ machinery. In particular:
 - text must continue through the existing GC, FB, and DIX paths;
 - glyph cursors must continue through `AllocGlyphCursor()`;
 - unsupported font requests must produce normal X11 errors;
-- native builds may retain their existing filesystem font behavior;
+- the supported products must not require filesystem font behavior;
 - no font parser, filesystem abstraction, or host callback is required merely
   to start the memory server.
 
@@ -35,18 +35,10 @@ changes, listing, querying, and text request suspension. A backend is
 responsible for opening a `FontRec`, returning glyphs and metrics, listing its
 fonts, and destroying backend-owned font data.
 
-The current native path registers two libXfont implementations:
-
-1. libXfont's `built-ins` FPE, containing 6x13 and cursor PCF data;
-2. libXfont's font-file FPE, which reads configured filesystem paths.
-
-The temporary `--disable-fonts` build replaces libXfont utility symbols with
-`dix/fontstubs.c`, but registers no FPE. `SetDefaultFont("fixed")` therefore
-fails during every generation.
-
-This means Phase 7 does not need to replace DIX font semantics. It needs a
-small, host-independent FPE and the few libXfont utility functions that DIX
-still calls directly.
+The inherited native path used libXfont's built-in and filesystem FPEs. The
+embedding work instead supplies the remaining utility symbols locally and
+registers a small host-independent FPE. DIX font semantics, resources, and
+rendering remain unchanged.
 
 ## Options considered
 
@@ -215,24 +207,14 @@ catalog lease. Generated data remains immutable and is never owned by an X
 client. The materializer must not retain pointers outside the leased decoded
 view, and catalog code must not inspect the resulting `FontRec`.
 
-### 5. Keep native and embedded policies distinct
+### 5. Use one filesystem-free build policy
 
-The native default build continues to register libXfont's built-in and
-font-file FPEs and keeps its current compiled font path. This avoids reducing
-`Xfbdev` or `Xvesa` font compatibility during the embedding refactor.
+All supported CMake products use the embedded-font configuration:
 
-The current `--disable-fonts` configuration becomes the embedded-font
-configuration:
-
-- it does not link `xfont` or `fontenc`;
-- it compiles the local font utility support and embedded FPE;
-- its default font path is `built-ins`;
-- it is runnable rather than build-only.
-
-The configure help text now describes the embedded behavior and the old
-`TINYX_NO_FONTS` macro has been replaced by `TINYX_EMBEDDED_FONTS`. A follow-up
-may replace the historical boolean option with an explicit
-`--with-font-backend=xfont|embedded` selection.
+- they do not link `xfont` or `fontenc`;
+- they compile the local font utility support and embedded FPE;
+- their default font path is `built-ins`;
+- `TINYX_EMBEDDED_FONTS` selects this code path.
 
 An explicit `-fp` or `SetFontPath` request in an embedded build accepts only
 `built-ins`. Unknown elements fail with the existing `BadValue` font-path
