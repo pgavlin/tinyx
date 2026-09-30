@@ -45,7 +45,12 @@ If the query is unavailable, the host falls back to 75 DPI. `--dpi` overrides
 automatic detection on both axes; it is useful with other compatible terminals
 or when a different UI scale is desired. Applications that request an explicit
 pixel-sized font, including stock st's default `pixelsize=12`, do not scale in
-response to DPI.
+response to DPI. Use a point-sized Xft pattern when launching st to make it
+follow the detected DPI:
+
+```sh
+DISPLAY=:99 st -f 'Liberation Mono:size=12:antialias=true:autohint=true'
+```
 
 Enhanced terminal keyboard events are translated to the fixed US Xorg keymap
 documented by `tinyx.h`. Explicit modifier-key events are preserved; when a

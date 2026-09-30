@@ -2,11 +2,11 @@
 
 ## Status
 
-This document plans native st and dwm integration through the Unix-domain X11
-socket provided by the Kitty reference host. The first milestone is an
-unmodified stock st process running directly on a one-screen TinyX display.
-The second is an unmodified stock dwm process managing st and other ordinary
-native X11 clients on that display.
+This document records completed native st and dwm integration through the
+Unix-domain X11 socket provided by the Kitty reference host. The first
+milestone was an unmodified stock st process running directly on a one-screen
+TinyX display. The second was an unmodified stock dwm process managing st and
+other ordinary native X11 clients on that display.
 
 No st- or dwm-specific TinyX API or server extension is expected. The purpose
 of the work is to validate the existing core protocol, Render, input,
@@ -21,10 +21,13 @@ that compiled KDrive without `kdrive-config.h` on 64-bit hosts, giving KDrive
 and DIX incompatible `KeySym` widths and corrupting `GetKeyboardMapping`.
 Native and swapped protocol tests now cover keyboard-map reads and changes.
 Stock dwm 6.8 also starts successfully, renders its Xft bar, installs its EWMH
-root properties, and rejects a second window manager. The Kitty host now
-reports its detected logical DPI, producing a correctly scaled dwm bar on
-HiDPI displays. Running st under dwm and manual terminal-to-Kitty input remain
-to be validated.
+root properties, and rejects a second window manager. Stock st runs under dwm,
+and the combined desktop path supports mapping, tiling, focus, input,
+selection, clipboard transfer, redraw, and terminal-driven resizing. The Kitty
+host reports its detected logical DPI, producing correctly scaled point-sized
+Xft text and dwm UI on HiDPI displays. This completes the initial native st and
+dwm compatibility scope; broader automated protocol coverage remains useful
+future regression work.
 
 Compiling dwm, Xlib, and application processes into WebAssembly is a separate
 project. It would require a client-side Xlib transport and replacements for
@@ -131,6 +134,18 @@ fallback, selections, and ordinary configure/expose handling. Exit st before
 the initial dwm run so that window-manager startup behavior can be tested from
 a clean root window.
 
+Stock st configures `Liberation Mono:pixelsize=12`, which deliberately ignores
+display DPI. For DPI-aware text without modifying the server or its bitmap
+font catalog, select an Xft point size at launch:
+
+```sh
+DISPLAY=:100 ./st -f 'Liberation Mono:size=12:antialias=true:autohint=true'
+```
+
+The same pattern can be compiled into st's `config.h`. Xft derives the pixel
+size from TinyX's reported physical screen dimensions; a fixed `pixelsize=`
+request remains fixed by design.
+
 ### 4. Start dwm
 
 In another shell:
@@ -178,9 +193,8 @@ Validate:
 
 Completion signal: an interactive shell in stock st renders continuously,
 accepts keyboard and mouse input, copies and pastes text, and survives repeated
-resizes without server-side font-path changes. Automated direct bring-up has
-validated rendering, synthetic keyboard input, both selections, and resizing;
-manual Kitty input remains outstanding.
+resizes without server-side font-path changes. Direct and dwm-managed bring-up
+validated rendering, input, both selections, and resizing.
 
 ### Slice 2: dwm Xft and Render
 
@@ -348,7 +362,8 @@ presentation test is native-only.
 
 ## Completion criteria
 
-Initial st and dwm support is complete when:
+Initial native st and dwm support is complete. The validated scope satisfies
+the following criteria:
 
 - stock native st runs directly on the Kitty-hosted TinyX display;
 - st renders Xft text, accepts input, supports selection and paste, and tracks
