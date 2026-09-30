@@ -447,6 +447,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut keyboard = KeyboardState::default();
     let mut pressed_buttons = HashSet::new();
     let mut frame_dirty = true;
+    let mut framebuffer_snapshot = Vec::new();
+    let mut missed_damage_reported = false;
     let mut current_image_id = None;
     let mut next_image_id = 1_u32;
     let mut next_frame = Instant::now();
@@ -637,7 +639,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         if Instant::now() >= next_frame {
-            frame_dirty |= server.take_damage()?;
+            let damaged = server.take_damage()?;
+            let framebuffer_changed =
+                server.framebuffer_snapshot_changed(&mut framebuffer_snapshot)?;
+            let changed_without_damage = framebuffer_changed && !damaged;
+            frame_dirty |= damaged || framebuffer_changed;
+            if changed_without_damage && !missed_damage_reported {
+                logger.write(format_args!(
+                    "framebuffer changed without a Damage notification; enabling snapshot fallback"
+                ));
+                missed_damage_reported = true;
+            }
             if frame_dirty {
                 let png = server.encode_png()?;
                 let viewport = Viewport::current();
