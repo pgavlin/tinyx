@@ -1035,7 +1035,10 @@ and paths produce normal X11 errors.
 Startup requires both a default text font and a cursor font. The root cursor
 is constructed from the latter. The embedded backend supplies both without a
 filesystem, confirming that fonts are part of core startup rather than merely
-an optional protocol feature.
+an optional protocol feature. The proposed
+[host-provided font design](font-provider-design.md) extends this catalog with
+synchronously registered, host-acquired BDF and PCF data while keeping file I/O
+and decompression outside the core.
 
 ## 16. Global state and the singleton model
 

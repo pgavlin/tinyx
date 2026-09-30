@@ -55,6 +55,9 @@ protocol semantics and server state.
 - **Phase 9 complete:** a sidecar CMake build produces and tests the native
   static library and an explicitly exported Emscripten module while retaining
   Autotools as the native reference build.
+- **Host font loading designed:** `docs/font-provider-design.md` specifies
+  synchronous, pre-client BDF/PCF registration over a mutable-then-frozen
+  catalog; implementation remains pending.
 
 ## Guiding principles
 
