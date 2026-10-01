@@ -3,8 +3,9 @@
 TermX is a native reference embedder for the public `tinyx.h` API. It exposes
 in-memory TinyX clients through a Unix-domain X11 socket, presents the memory
 framebuffer using the Kitty graphics protocol, and translates terminal keyboard
-and mouse events into TinyX input injection calls. It uses TinyX damage to
-decide when to present a replacement frame. Frames use compressed raw RGB data.
+and mouse events into TinyX input injection calls. It applies TinyX damage
+rectangles directly to Kitty's root animation frame using compressed raw RGB
+data.
 When running in a local Kitty window, larger payloads use POSIX shared memory
 to avoid base64 transfer through the terminal stream. A temporary file is used
 if shared-memory creation fails, and direct transfer remains the remote and
@@ -69,6 +70,15 @@ values. A command on the command line replaces the configured command.
 For protocol diagnosis, set `trace_directory` to a directory under which TermX
 may create one run directory. Each client produces exact `client-N-c2s.bin` and
 `client-N-s2c.bin` byte streams. Tracing is disabled by default.
+
+Run `termx --benchmark-kitty [PATH]` inside Kitty to measure the graphics
+transport without starting TinyX clients. Results default to
+`/tmp/termx-kitty-benchmark-<pid>.csv`; an explicit path overrides that file. It reports acknowledgement latency for base
+frames and cursor-sized, text-line, window-sized, and full-screen damage
+updates across 320×200, 640×400, 1280×720, 1920×1080, and the current terminal
+pixel dimensions. Each size is tested with disabled, adaptive, and forced zlib;
+direct, temporary-file, and shared-memory transport; and 1024- and 4096-byte
+direct chunks.
 
 Press Control-C to exit. The X screen uses the full terminal pixel area and is
 resized when that area changes. TinyX replaces its framebuffer and notifies

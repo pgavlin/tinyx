@@ -835,7 +835,7 @@ none and creates no listeners.
 `embedders/termx/` is a complete native Rust embedder over this facade. It
 adapts a nonblocking Unix-domain socket to descriptor-free TinyX clients and
 presents the read-only framebuffer through the Kitty graphics protocol. It
-uses TinyX Damage to decide when to present a replacement frame and sends
+applies TinyX Damage rectangles directly to Kitty's root animation frame as
 compressed raw-RGB data. Large local transfers use Kitty's POSIX shared-memory
 medium, with temporary-file and direct-transfer fallbacks, instead of base64
 terminal traffic. Before starting concurrent terminal input, it

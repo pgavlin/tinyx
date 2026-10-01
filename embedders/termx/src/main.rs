@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+mod benchmark;
 mod ffi;
 mod input;
 
@@ -49,6 +50,7 @@ const HELP: &str = concat!(
     "  --log PATH        Log file path [default: /tmp/termx-<pid>.log]\n",
     "  --trace-directory PATH  Capture per-client X11 byte streams\n",
     "  --dpi NUMBER      Override terminal DPI (1 through 1000)\n",
+    "  --benchmark-kitty [PATH]  Benchmark Kitty transfers to a CSV file\n",
     "  -h, --help        Print help\n\n",
     "Command:\n",
     "  An optional client or session to launch after startup. TermX sets its\n",
@@ -230,6 +232,21 @@ struct PresentStats {
     full_frame: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ZlibPolicy {
+    Never,
+    Adaptive,
+    Always,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GraphicsTransport {
+    Auto,
+    Direct,
+    TemporaryFile,
+    SharedMemory,
+}
+
 #[derive(Debug)]
 struct KittyPresenter {
     image_id: u32,
@@ -267,53 +284,87 @@ impl KittyPresenter {
         damage: Vec<DamageRect>,
         force_full: bool,
     ) -> Result<PresentStats, Box<dyn std::error::Error>> {
-        let rects = plan_damage(screen, damage, force_full || self.screen != Some(screen));
+        let initialize = self.screen != Some(screen);
+        let rects = plan_damage(screen, damage, force_full || initialize);
         if rects.is_empty() && self.placement == Some(placement) {
             return Ok(PresentStats::default());
         }
 
-        let full = DamageRect {
-            x: 0,
-            y: 0,
-            width: screen.width,
-            height: screen.height,
-        };
-        let rgb = server.rgb(full).map_err(io::Error::other)?;
-        let previous_image = self.screen.map(|_| self.image_id);
-        let image_id = previous_image
-            .map(|id| id.checked_add(1).unwrap_or(1))
-            .unwrap_or(self.image_id);
-
-        write!(
-            writer,
-            "\x1b[s\x1b[{};{}H",
-            placement.row + 1,
-            placement.column + 1
-        )?;
-        let wire_bytes = self.transmit(
-            writer,
-            &format!(
-                "a=T,f=24,s={},v={},i={image_id},p={},q=2,C=1,c={},r={}",
-                screen.width, screen.height, self.placement_id, placement.columns, placement.rows
-            ),
-            &rgb,
-            false,
-        )?;
-        if let Some(previous_image) = previous_image {
-            delete_kitty_image(writer, previous_image)?;
+        writer.write_all(b"\x1b[s")?;
+        let mut stats = PresentStats::default();
+        if initialize {
+            let full = DamageRect {
+                x: 0,
+                y: 0,
+                width: screen.width,
+                height: screen.height,
+            };
+            let rgb = server.rgb(full).map_err(io::Error::other)?;
+            write!(
+                writer,
+                "\x1b[{};{}H",
+                placement.row + 1,
+                placement.column + 1
+            )?;
+            stats.wire_bytes = self.transmit(
+                writer,
+                &format!(
+                    "a=T,f=24,s={},v={},i={},p={},q=2,C=1,c={},r={}",
+                    screen.width,
+                    screen.height,
+                    self.image_id,
+                    self.placement_id,
+                    placement.columns,
+                    placement.rows
+                ),
+                &rgb,
+                false,
+            )?;
+            stats.regions = 1;
+            stats.pixels = u64::from(screen.width) * u64::from(screen.height);
+            stats.full_frame = true;
+        } else {
+            if self.placement != Some(placement) {
+                write!(
+                    writer,
+                    "\x1b[{};{}H\x1b_Ga=p,i={},p={},q=2,C=1,c={},r={};\x1b\\",
+                    placement.row + 1,
+                    placement.column + 1,
+                    self.image_id,
+                    self.placement_id,
+                    placement.columns,
+                    placement.rows
+                )?;
+            }
+            for rect in &rects {
+                let rgb = server.rgb(*rect).map_err(io::Error::other)?;
+                stats.wire_bytes += self.transmit(
+                    writer,
+                    &format!(
+                        "a=f,r=1,i={},f=24,q=2,x={},y={},s={},v={},X=1",
+                        self.image_id, rect.x, rect.y, rect.width, rect.height
+                    ),
+                    &rgb,
+                    true,
+                )?;
+                stats.pixels += u64::from(rect.width) * u64::from(rect.height);
+            }
+            if !rects.is_empty() {
+                select_kitty_frame(writer, self.image_id, 1)?;
+                stats.regions = rects.len();
+                stats.full_frame = rects.len() == 1
+                    && rects[0].x == 0
+                    && rects[0].y == 0
+                    && rects[0].width == screen.width
+                    && rects[0].height == screen.height;
+            }
         }
         writer.write_all(b"\x1b[u")?;
         writer.flush()?;
 
-        self.image_id = image_id;
         self.screen = Some(screen);
         self.placement = Some(placement);
-        Ok(PresentStats {
-            regions: 1,
-            pixels: u64::from(screen.width) * u64::from(screen.height),
-            wire_bytes,
-            full_frame: true,
-        })
+        Ok(stats)
     }
 
     fn transmit(
@@ -323,32 +374,77 @@ impl KittyPresenter {
         pixels: &[u8],
         animation: bool,
     ) -> io::Result<usize> {
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(pixels)?;
-        let compressed = encoder.finish()?;
-        let (payload, compression) = if compressed.len() < pixels.len() {
-            (compressed.as_slice(), ",o=z")
+        self.transmit_with(
+            writer,
+            control,
+            pixels,
+            animation,
+            ZlibPolicy::Adaptive,
+            GraphicsTransport::Auto,
+            4096,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn transmit_with(
+        &mut self,
+        writer: &mut impl Write,
+        control: &str,
+        pixels: &[u8],
+        animation: bool,
+        zlib: ZlibPolicy,
+        transport: GraphicsTransport,
+        chunk_size: usize,
+    ) -> io::Result<usize> {
+        if chunk_size == 0 || chunk_size > 4096 || chunk_size % 4 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Kitty direct-transfer chunks must be a nonzero multiple of four at most 4096 bytes",
+            ));
+        }
+        let compressed = if zlib == ZlibPolicy::Never {
+            None
+        } else {
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+            encoder.write_all(pixels)?;
+            Some(encoder.finish()?)
+        };
+        let use_compressed = match (&compressed, zlib) {
+            (Some(_), ZlibPolicy::Always) => true,
+            (Some(bytes), ZlibPolicy::Adaptive) => bytes.len() < pixels.len(),
+            _ => false,
+        };
+        let (payload, compression) = if use_compressed {
+            (compressed.as_deref().unwrap(), ",o=z")
         } else {
             (pixels, "")
         };
 
-        if self.local_media && payload.len() >= 4096 {
-            if let Ok(name) = self.write_shared_payload(payload) {
-                let encoded_name =
-                    base64::engine::general_purpose::STANDARD.encode(name.as_bytes());
-                let result = write!(
-                    writer,
-                    "\x1b_G{control}{compression},t=s,S={};{encoded_name}\x1b\\",
-                    payload.len()
-                );
-                if result.is_err() {
-                    unsafe { libc::shm_unlink(name.as_ptr()) };
+        let local_auto =
+            transport == GraphicsTransport::Auto && self.local_media && payload.len() >= 4096;
+        if transport == GraphicsTransport::SharedMemory || local_auto {
+            match self.write_shared_payload(payload) {
+                Ok(name) => {
+                    let encoded_name =
+                        base64::engine::general_purpose::STANDARD.encode(name.as_bytes());
+                    let result = write!(
+                        writer,
+                        "\x1b_G{control}{compression},t=s,S={};{encoded_name}\x1b\\",
+                        payload.len()
+                    );
+                    if result.is_err() {
+                        unsafe { libc::shm_unlink(name.as_ptr()) };
+                    }
+                    result?;
+                    self.last_medium = "shared-memory";
+                    return Ok(payload.len());
                 }
-                result?;
-                self.last_medium = "shared-memory";
-                return Ok(payload.len());
+                Err(error) if transport == GraphicsTransport::SharedMemory => return Err(error),
+                Err(_) => {}
             }
+        }
 
+        if transport == GraphicsTransport::TemporaryFile || local_auto {
             let path = self.write_temporary_payload(payload)?;
             let encoded_path = base64::engine::general_purpose::STANDARD
                 .encode(path.as_os_str().as_encoded_bytes());
@@ -366,8 +462,8 @@ impl KittyPresenter {
         }
 
         let encoded = base64::engine::general_purpose::STANDARD.encode(payload);
-        for (index, chunk) in encoded.as_bytes().chunks(4096).enumerate() {
-            let more = usize::from((index + 1) * 4096 < encoded.len());
+        for (index, chunk) in encoded.as_bytes().chunks(chunk_size).enumerate() {
+            let more = usize::from((index + 1) * chunk_size < encoded.len());
             if index == 0 {
                 write!(writer, "\x1b_G{control}{compression},t=d,m={more};")?;
             } else if animation {
@@ -978,6 +1074,24 @@ struct Connection {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let arguments: Vec<_> = std::env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|arg| arg == "--benchmark-kitty")
+    {
+        if arguments.len() > 2 {
+            return Err("--benchmark-kitty accepts at most one output path".into());
+        }
+        let output = arguments.get(1).map(PathBuf::from).unwrap_or_else(|| {
+            PathBuf::from(format!(
+                "/tmp/termx-kitty-benchmark-{}.csv",
+                std::process::id()
+            ))
+        });
+        benchmark::run(&output)?;
+        eprintln!("benchmark CSV: {}", output.display());
+        return Ok(());
+    }
     let Some(options) = Options::load()? else {
         print!("{HELP}");
         return Ok(());
@@ -1319,8 +1433,12 @@ fn apply_key_event(
     Ok(())
 }
 
+fn select_kitty_frame(writer: &mut impl Write, image_id: u32, frame: u32) -> io::Result<()> {
+    write!(writer, "\x1b_Ga=a,q=2,c={frame},i={image_id};\x1b\\")
+}
+
 fn delete_kitty_image(writer: &mut impl Write, image_id: u32) -> io::Result<()> {
-    write!(writer, "\x1b_Ga=d,d=I,i={image_id},q=2\x1b\\")?;
+    write!(writer, "\x1b_Ga=d,d=I,i={image_id},q=2;\x1b\\")?;
     writer.flush()
 }
 
@@ -1545,6 +1663,13 @@ mod tests {
             text.starts_with("\u{1b}_Ga=f,f=24,i=1,q=2,r=2,x=2,y=3,s=100,v=100,X=1,o=z,t=d,m=")
         );
         assert!(text.ends_with("\u{1b}\\"));
+    }
+
+    #[test]
+    fn kitty_frame_selection_has_an_empty_payload_separator() {
+        let mut output = Vec::new();
+        select_kitty_frame(&mut output, 7, 1).unwrap();
+        assert_eq!(output, b"\x1b_Ga=a,q=2,c=1,i=7;\x1b\\");
     }
 
     #[test]
