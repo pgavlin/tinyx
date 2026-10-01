@@ -3,7 +3,7 @@
 ## Status
 
 This document records completed native st and dwm integration through the
-Unix-domain X11 socket provided by the Kitty reference embedder. The first
+Unix-domain X11 socket provided by the TermX reference embedder. The first
 milestone was an unmodified stock st process running directly on a one-screen
 TinyX display. The second was an unmodified stock dwm process managing st and
 other ordinary native X11 clients on that display.
@@ -13,7 +13,7 @@ of the work is to validate the existing core protocol, Render, input,
 selection, resize, and socket-host paths together and fix general X11
 compatibility defects exposed by real applications.
 
-Stock st 0.9.3 has completed initial direct bring-up on the Kitty-hosted display
+Stock st 0.9.3 has completed initial direct bring-up on the TermX-hosted display
 using macOS XQuartz client libraries. Xft text rendering, shell output, XTEST
 keyboard input, primary selection, clipboard transfer, and explicit window
 resizing all worked. The bring-up exposed and fixed a CMake configuration bug
@@ -23,8 +23,8 @@ Native and swapped protocol tests now cover keyboard-map reads and changes.
 Stock dwm 6.8 also starts successfully, renders its Xft bar, installs its EWMH
 root properties, and rejects a second window manager. Stock st runs under dwm,
 and the combined desktop path supports mapping, tiling, focus, input,
-selection, clipboard transfer, redraw, and terminal-driven resizing. The Kitty
-host reports its detected logical DPI, producing correctly scaled point-sized
+selection, clipboard transfer, redraw, and terminal-driven resizing. TermX
+reports its detected logical DPI, producing correctly scaled point-sized
 Xft text and dwm UI on HiDPI displays. This completes the initial native st and
 dwm compatibility scope; broader automated protocol coverage remains useful
 future regression work.
@@ -60,7 +60,7 @@ Stock dwm 6.8 uses:
 It does not require Composite, GLX, MIT-SHM, XKB, or a compositor. TinyX
 already has the relevant core DIX behavior, a Render/FB implementation, the
 complete cursor bitmap font, multiple memory clients, a depth-24 memory screen,
-input injection, runtime resizing, and the Kitty socket bridge.
+input injection, runtime resizing, and the TermX socket bridge.
 
 The server-side BDF/PCF provider is not required. Xft opens fonts using
 fontconfig and FreeType in the st or dwm process, rasterizes glyphs there, and
@@ -74,7 +74,7 @@ The initial supported configuration is:
 
 - unmodified native st, first without and then with dwm;
 - native dwm and other native X11 applications;
-- the Kitty embedder as the TinyX host and presenter;
+- TermX as the TinyX host and presenter;
 - one TinyX screen and one dwm monitor;
 - a local trusted Unix-domain display socket;
 - the stock dwm rendering and event loop;
@@ -110,10 +110,10 @@ alternatively edit `config.h` or launch clients from another shell.
 
 ### 2. Start the display host
 
-Run the Kitty embedder on an unused display number:
+Run TermX on an unused display number:
 
 ```sh
-cargo run --manifest-path embedders/kitty/Cargo.toml --release -- --display 100
+cargo run --manifest-path embedders/termx/Cargo.toml --release -- --display 100
 ```
 
 The host creates `/tmp/.X11-unix/X100`, maps each accepted socket connection to
@@ -206,7 +206,8 @@ The dwm bar is the next high-value Render integration test. Validate:
 - glyph-set creation, glyph upload, and glyph destruction;
 - antialiased glyph composition into dwm's depth-24 backing pixmap;
 - `XCopyArea()` from the backing pixmap into the bar window;
-- framebuffer damage and Kitty presentation of the resulting pixels;
+- framebuffer damage and TermX presentation of the resulting pixels through
+  the Kitty graphics protocol;
 - UTF-8 text and Xft fallback-font behavior.
 
 A small standalone Xft smoke client may be added if diagnosing dwm directly is
@@ -231,7 +232,7 @@ relies:
 - destroying or disconnecting dwm releases root event ownership.
 
 These should become protocol-level regression tests with two descriptor-free
-clients, independently of the Kitty embedder.
+clients, independently of TermX.
 
 Completion signal: newly launched xterm windows are tiled and bordered by dwm
 rather than appearing unmanaged.
@@ -254,7 +255,7 @@ when supported.
 
 ### Slice 5: keyboard and pointer grabs
 
-Validate both the core server and Kitty input adapter:
+Validate both the core server and TermX input adapter:
 
 - core keyboard mapping exposes the expected Xorg keycodes and modifiers;
 - `XGrabKey()` installs dwm's passive grabs, including lock-mask variants;
@@ -285,7 +286,7 @@ changes are visible over the root, client, and drag regions.
 
 ### Slice 7: runtime resize
 
-The Kitty embedder resizes TinyX when terminal pixel capacity changes. dwm does not
+TermX resizes TinyX when terminal pixel capacity changes. dwm does not
 need RandR for its basic one-monitor response; it handles root
 `ConfigureNotify` and recalculates monitor and bar geometry.
 
@@ -333,13 +334,13 @@ report:
    event routing and modifier state.
 7. **Resize test:** keep application and WM clients connected across repeated
    screen changes and verify notifications and final geometry.
-8. **Manual st test:** run stock st directly through the Kitty socket and record
+8. **Manual st test:** run stock st directly through the TermX socket and record
    rendering, typing, selection, clipboard, focus, and resize results.
 9. **Manual desktop test:** run stock dwm with st, xterm, and xclock through the
-   Kitty socket and record the tested host versions and configuration.
+   TermX socket and record the tested host versions and configuration.
 
 Protocol tests should run in native CMake and Emscripten/Node where applicable.
-The actual dwm process and Kitty presentation test is native-only.
+The actual dwm process and TermX presentation test is native-only.
 
 ## Failure diagnosis
 
@@ -364,10 +365,10 @@ The actual dwm process and Kitty presentation test is native-only.
 Initial native st and dwm support is complete. The validated scope satisfies
 the following criteria:
 
-- stock native st runs directly on the Kitty-hosted TinyX display;
+- stock native st runs directly on the TermX-hosted TinyX display;
 - st renders Xft text, accepts input, supports selection and paste, and tracks
   repeated resizes without server-side font configuration;
-- stock native dwm starts on the Kitty-hosted TinyX display;
+- stock native dwm starts on the TermX-hosted TinyX display;
 - dwm owns root substructure redirection and a second WM is rejected;
 - the Xft-rendered bar is legible without host-provided server fonts;
 - st, xterm, and xclock windows are discovered, tiled, focused, restacked, and

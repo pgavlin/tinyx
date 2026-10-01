@@ -622,7 +622,7 @@ Through a descriptor-free client:
 5. **Public provider API:** extend initial server configuration with immutable
    provider operations and the complete source/alias manifest; add callback
    leases, diagnostics, reentrancy guards, and explicit WASM exports.
-6. **Embedder integration:** teach the Kitty embedder to discover and preload a font
+6. **Embedder integration:** teach the TermX embedder to discover and preload a font
    manifest and serve ready uncompressed bytes by source identifier.
 7. **End-to-end validation:** exercise listing without acquisition, lazy open,
    rendering, caching, aliases, failure, shutdown, native embedders, and WASM.

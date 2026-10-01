@@ -209,6 +209,11 @@ TINYX_API tinyx_status tinyx_server_resize(
 
 TINYX_API tinyx_status tinyx_server_get_framebuffer(
     tinyx_server *server, tinyx_framebuffer_info *info);
+/*
+ * Return and clear accumulated framebuffer damage. Passing zero capacity and
+ * a null rectangle pointer reports the number of rectangles without clearing
+ * them, so the caller can size a subsequent request.
+ */
 TINYX_API tinyx_status tinyx_server_take_damage(tinyx_server *server,
                                                 tinyx_damage_rect *rects,
                                                 size_t capacity,

@@ -12,7 +12,7 @@ DIX/MI/FB/KDrive server architecture. It provides:
 - runtime resize, host-controlled DPI, and configurable X11 visuals;
 - built-in filesystem-free bitmap text and cursor fonts;
 - native static-library and Emscripten module targets;
-- headless C and Kitty-terminal reference embedders.
+- headless C and TermX terminal reference embedders.
 
 Build
 -----

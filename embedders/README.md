@@ -17,7 +17,7 @@ is itself an interactive host.
 Included embedders:
 
 - [`headless`](headless/README.md) is the smallest native C consumer;
-- [`kitty`](kitty/README.md) bridges a Unix-domain X11 socket, terminal input,
+- [`termx`](termx/README.md) bridges a Unix-domain X11 socket, terminal input,
   and the Kitty graphics protocol.
 
 Future SDL, Cocoa, browser, or application-specific embedders should use the

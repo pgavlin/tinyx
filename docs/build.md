@@ -67,21 +67,21 @@ colormaps, windows, pixmaps, GCs, and core drawing. The native and Emscripten
 inspects the framebuffer, and exits without acquiring clients or presenting
 pixels.
 
-### Kitty terminal embedder
+### TermX terminal embedder
 
-`embedders/kitty` is a complete native embedder for the public C API. Its Cargo
+`embedders/termx` is a complete native embedder for the public C API. Its Cargo
 build invokes CMake, listens for ordinary X11 clients on a Unix-domain socket,
 presents framebuffer damage with the Kitty graphics protocol, and injects
 terminal keyboard and mouse input:
 
 ```sh
-cargo run --manifest-path embedders/kitty/Cargo.toml --release
+cargo run --manifest-path embedders/termx/Cargo.toml --release
 # In another shell:
 DISPLAY=:99 xclock
 ```
 
 The default display is `:99`. The host queries Kitty for its logical DPI and
-supports an explicit `--dpi` override. See `embedders/kitty/README.md` for
+supports an explicit `--dpi` override. See `embedders/termx/README.md` for
 socket, log, DPI, and dependency configuration. This development host trusts
 clients admitted through its local socket. Completed native stock-st and
 stock-dwm bring-up, configuration, and validation are documented in

@@ -69,7 +69,8 @@ XtransClose(void *connection)
 static const TinyXTransportOps xtransOps = {
     XtransRead,
     XtransWrite,
-    XtransClose
+    XtransClose,
+    NULL
 };
 #endif
 
@@ -87,6 +88,14 @@ TinyXTransportWrite(OsCommPtr oc, const void *buffer, size_t size, size_t *count
     if (oc->transportClosed || !oc->transportOps)
         return TINYX_TRANSPORT_CLOSED;
     return oc->transportOps->write(oc->transportData, buffer, size, count);
+}
+
+int
+TinyXTransportReadPending(OsCommPtr oc)
+{
+    return !oc->transportClosed && oc->transportOps &&
+        oc->transportOps->readPending &&
+        oc->transportOps->readPending(oc->transportData);
 }
 
 void

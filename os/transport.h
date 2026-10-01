@@ -23,6 +23,7 @@ typedef struct {
     TinyXTransportResult (*write)(void *connection, const void *buffer,
                                   size_t size, size_t *count);
     void (*close)(void *connection);
+    int (*readPending)(void *connection);
 } TinyXTransportOps;
 
 struct _osComm;
@@ -34,6 +35,7 @@ TinyXTransportResult TinyXTransportWrite(struct _osComm *oc,
                                          const void *buffer, size_t size,
                                          size_t *count);
 void TinyXTransportClose(struct _osComm *oc);
+int TinyXTransportReadPending(struct _osComm *oc);
 void TinyXInitXtransTransport(struct _osComm *oc,
                              struct _XtransConnInfo *connection);
 

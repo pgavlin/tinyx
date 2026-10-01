@@ -958,7 +958,7 @@ tinyx_server_take_damage(tinyx_server *server, tinyx_damage_rect *rects,
         }
     }
     count = TinyXMemoryDisplayTakeDamage(internal, capacity);
-    for (i = 0; i < count; i++) {
+    for (i = 0; i < count && i < capacity; i++) {
         rects[i].x = internal[i].x;
         rects[i].y = internal[i].y;
         rects[i].width = internal[i].width;

@@ -13,4 +13,4 @@ cmake --build build/native --target tinyx-embedder-headless
 ```
 
 Real embedders add their own client acquisition, presentation, and input event
-sources. `embedders/kitty` is the complete native reference embedder.
+sources. `embedders/termx` is the complete native reference embedder.

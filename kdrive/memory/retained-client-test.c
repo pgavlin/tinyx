@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 
 #include "tinyx.h"
 
@@ -55,7 +56,10 @@ main(void)
     tinyx_server *server = NULL;
     tinyx_client *retained = NULL;
     tinyx_client *active = NULL;
+    unsigned char requests[2048 * sizeof(no_operation) + 4];
+    unsigned char reply[32];
     size_t count;
+    size_t i;
     int result = 1;
 
     tinyx_screen_config_init(&screen);
@@ -84,6 +88,24 @@ main(void)
     if (tinyx_client_send(active, no_operation, sizeof(no_operation),
                           &count) != TINYX_OK ||
         count != sizeof(no_operation) || !pump(server, 1))
+        goto done;
+
+    /* A single host send can span several DIX input-buffer fills. Keep the
+     * memory transport runnable between fills so the trailing reply request
+     * is not stranded until the host happens to send more bytes. */
+    for (i = 0; i < 2048; i++)
+        memcpy(requests + i * sizeof(no_operation), no_operation,
+               sizeof(no_operation));
+    requests[sizeof(requests) - 4] = 43; /* GetInputFocus */
+    requests[sizeof(requests) - 3] = 0;
+    requests[sizeof(requests) - 2] = 1;
+    requests[sizeof(requests) - 1] = 0;
+    if (tinyx_client_send(active, requests, sizeof(requests), &count) !=
+            TINYX_OK ||
+        count != sizeof(requests) || !pump(server, 2049) ||
+        tinyx_client_receive(active, reply, sizeof(reply), &count) !=
+            TINYX_OK ||
+        count != sizeof(reply) || reply[0] != 1)
         goto done;
 
     result = 0;

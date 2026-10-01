@@ -85,6 +85,9 @@ main(void)
         framebuffer.width != 96 || framebuffer.height != 48 ||
         framebuffer.stride_bytes < 96 * 4)
         return 11;
+    if (tinyx_server_take_damage(server, NULL, 0, &count) != TINYX_OK ||
+        count != 1)
+        return 12;
     if (tinyx_server_take_damage(server, &damage, 1, &count) != TINYX_OK ||
         count != 1 || damage.x != 0 || damage.y != 0 ||
         damage.width != 96 || damage.height != 48)

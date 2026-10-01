@@ -153,7 +153,7 @@ OsCommPtr AvailableInput = (OsCommPtr)NULL;
 	  timesThisConnection = 0; }
 #define YieldControlNoInput()			\
         { YieldControl();			\
-          OsCommSetInputReady(oc, FALSE); }
+          OsCommSetInputReady(oc, TinyXTransportReadPending(oc)); }
 #define YieldControlDeath()			\
         { timesThisConnection = 0; }
 

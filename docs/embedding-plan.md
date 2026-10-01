@@ -12,7 +12,7 @@ examples, and Emscripten module from explicit source manifests.
 The intended dependency direction is:
 
 ```text
-Kitty embedder ───┐
+TermX embedder ───┐
 headless embedder ┼──> embedding API/core <── DIX, MI, FB, selected extensions
 WASM embedder ────┘
 ```
@@ -545,7 +545,7 @@ embedded native and WASM targets.
 The root `CMakeLists.txt` maintains explicit subsystem source manifests.
 `tinyx-core` and `tinyx-host-memory` object targets are combined into the
 installed `libtinyx.a`, avoiding legacy static-archive ordering problems. The
-headless and Kitty embedders and the API/font tests link this library.
+headless and TermX embedders and the API/font tests link this library.
 Generated CMake configuration headers select the embedded font backend and
 memory KDrive.
 
@@ -605,7 +605,7 @@ alongside boundary extraction rather than after it.
 ### Native embedder regression tests
 
 - start through the public API without listeners;
-- bridge representative existing X clients through the Kitty embedder;
+- bridge representative existing X clients through the TermX embedder;
 - run native library and embedder builds under sanitizers;
 - verify that acquisition and presentation dependencies do not leak into the
   core library.

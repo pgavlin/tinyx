@@ -832,10 +832,13 @@ public header, and `api-test.c` drives an X11 setup handshake through the
 facade. Every runnable product supplies its own entry point; the library has
 none and creates no listeners.
 
-`embedders/kitty/` is a complete native Rust embedder over this facade. It
-adapts a nonblocking Unix-domain socket to descriptor-free TinyX clients, consumes
-Damage before encoding the read-only framebuffer as PNG, and presents it with
-the Kitty graphics protocol. Before starting concurrent terminal input, it
+`embedders/termx/` is a complete native Rust embedder over this facade. It
+adapts a nonblocking Unix-domain socket to descriptor-free TinyX clients and
+presents the read-only framebuffer through the Kitty graphics protocol. It
+uses TinyX Damage to decide when to present a replacement frame and sends
+compressed raw-RGB data. Large local transfers use Kitty's POSIX shared-memory
+medium, with temporary-file and direct-transfer fallbacks, instead of base64
+terminal traffic. Before starting concurrent terminal input, it
 uses Kitty's terminal query protocol to obtain the active window's logical DPI
 and converts that to X11 physical dimensions; an explicit override and a
 75-DPI fallback cover unavailable queries. Terminal resize events resize the X
@@ -853,7 +856,7 @@ core window-manager behavior, input, and resizing, as recorded in
 The root `CMakeLists.txt` assembles explicit source manifests into
 `tinyx-core` and `tinyx-host-memory` object targets, then combines them into
 the installed `libtinyx.a`. Object targets avoid imposing artificial archive
-link-order boundaries on the legacy callback graph. The headless and Kitty
+link-order boundaries on the legacy callback graph. The headless and TermX
 embedders and API tests link the same static product.
 
 Every target uses the descriptor-free admission policy in

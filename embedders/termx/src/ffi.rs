@@ -115,12 +115,12 @@ impl Default for FramebufferInfo {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct DamageRect {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DamageRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
 }
 
 unsafe extern "C" {
@@ -334,16 +334,32 @@ impl Server {
         }
     }
 
-    pub fn take_damage(&self) -> Result<bool, String> {
-        let mut rect = DamageRect::default();
+    pub fn take_damage(&self) -> Result<Vec<DamageRect>, String> {
         let mut count = 0;
         unsafe {
             status(
                 "tinyx_server_take_damage",
-                tinyx_server_take_damage(self.raw.as_ptr(), &mut rect, 1, &mut count),
+                tinyx_server_take_damage(self.raw.as_ptr(), ptr::null_mut(), 0, &mut count),
             )?;
         }
-        Ok(count != 0)
+        if count == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut rects = vec![DamageRect::default(); count];
+        unsafe {
+            status(
+                "tinyx_server_take_damage",
+                tinyx_server_take_damage(
+                    self.raw.as_ptr(),
+                    rects.as_mut_ptr(),
+                    rects.len(),
+                    &mut count,
+                ),
+            )?;
+        }
+        rects.truncate(count);
+        Ok(rects)
     }
 
     fn framebuffer_info(&self) -> Result<FramebufferInfo, String> {
@@ -373,12 +389,23 @@ impl Server {
         Ok(info)
     }
 
-    pub fn encode_png(&self) -> Result<Vec<u8>, String> {
+    pub fn rgb(&self, rect: DamageRect) -> Result<Vec<u8>, String> {
         let info = self.framebuffer_info()?;
+        if rect.x < 0
+            || rect.y < 0
+            || rect.width == 0
+            || rect.height == 0
+            || rect.x as u32 > info.width.saturating_sub(rect.width)
+            || rect.y as u32 > info.height.saturating_sub(rect.height)
+        {
+            return Err("damage rectangle lies outside the framebuffer".to_owned());
+        }
+
         let pixels = unsafe { std::slice::from_raw_parts(info.pixels.cast::<u8>(), info.size) };
-        let mut rgb = Vec::with_capacity(info.width as usize * info.height as usize * 3);
-        for y in 0..info.height as usize {
-            let row = &pixels[y * info.stride_bytes..][..info.width as usize * 4];
+        let mut rgb = Vec::with_capacity(rect.width as usize * rect.height as usize * 3);
+        for y in rect.y as usize..(rect.y as usize + rect.height as usize) {
+            let x = rect.x as usize * 4;
+            let row = &pixels[y * info.stride_bytes + x..][..rect.width as usize * 4];
             for bytes in row.chunks_exact(4) {
                 let pixel = match info.byte_order {
                     0 => u32::from_le_bytes(bytes.try_into().unwrap()),
@@ -390,20 +417,7 @@ impl Server {
                 rgb.push((pixel & info.blue_mask) as u8);
             }
         }
-
-        let mut encoded = Vec::new();
-        {
-            let mut encoder = png::Encoder::new(&mut encoded, info.width, info.height);
-            encoder.set_color(png::ColorType::Rgb);
-            encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder
-                .write_header()
-                .map_err(|error| format!("could not encode PNG header: {error}"))?;
-            writer
-                .write_image_data(&rgb)
-                .map_err(|error| format!("could not encode PNG pixels: {error}"))?;
-        }
-        Ok(encoded)
+        Ok(rgb)
     }
 }
 
@@ -481,9 +495,18 @@ mod tests {
         let setup = [b'l', 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let server = Server::create(64, 64, 22, 22).unwrap();
         server.resize(80, 48).unwrap();
-        let png = server.encode_png().unwrap();
-        assert_eq!(&png[16..20], &80_u32.to_be_bytes());
-        assert_eq!(&png[20..24], &48_u32.to_be_bytes());
+        let damage = server.take_damage().unwrap();
+        assert_eq!(
+            damage,
+            vec![DamageRect {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 48
+            }]
+        );
+        let rgb = server.rgb(damage[0]).unwrap();
+        assert_eq!(rgb.len(), 80 * 48 * 3);
         let mut client = server.open_client().unwrap();
         assert_eq!(client.send(&setup), Ok(setup.len()));
 

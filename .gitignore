@@ -6,7 +6,7 @@ __pycache__/
 /build/
 /build-*/
 /build-wasm*/
-/embedders/kitty/target/
+/embedders/termx/target/
 err
 *rig
 *rej

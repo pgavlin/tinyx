@@ -98,6 +98,14 @@ MemoryWrite(void *connection, const void *buffer, size_t size, size_t *count)
     return TINYX_TRANSPORT_PROGRESS;
 }
 
+static int
+MemoryReadPending(void *connection)
+{
+    TinyXMemoryClient *memory = connection;
+
+    return memory->inputCount || memory->inputClosed;
+}
+
 static void
 MemoryClose(void *connection)
 {
@@ -110,7 +118,8 @@ MemoryClose(void *connection)
 static const TinyXTransportOps memoryOps = {
     MemoryRead,
     MemoryWrite,
-    MemoryClose
+    MemoryClose,
+    MemoryReadPending
 };
 
 TinyXMemoryClient *
