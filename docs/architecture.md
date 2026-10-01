@@ -836,9 +836,9 @@ none and creates no listeners.
 adapts a nonblocking Unix-domain socket to descriptor-free TinyX clients and
 presents the read-only framebuffer through the Kitty graphics protocol. It
 applies TinyX Damage rectangles directly to Kitty's root animation frame as
-compressed raw-RGB data. Large local transfers use Kitty's POSIX shared-memory
-medium, with temporary-file and direct-transfer fallbacks, instead of base64
-terminal traffic. Before starting concurrent terminal input, it
+raw RGB data. Large local transfers use uncompressed POSIX shared memory, with
+a temporary-file fallback; smaller and remote direct transfers use adaptive
+zlib compression. Before starting concurrent terminal input, it
 uses Kitty's terminal query protocol to obtain the active window's logical DPI
 and converts that to X11 physical dimensions; an explicit override and a
 75-DPI fallback cover unavailable queries. Terminal resize events resize the X

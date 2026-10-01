@@ -35,6 +35,7 @@ use input::KeyboardState;
 use serde::Deserialize;
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
+const LOCAL_TRANSPORT_THRESHOLD: usize = 256 * 1024;
 const FALLBACK_CELL_WIDTH: u32 = 8;
 const FALLBACK_CELL_HEIGHT: u32 = 16;
 const HELP: &str = concat!(
@@ -402,13 +403,22 @@ impl KittyPresenter {
                 "Kitty direct-transfer chunks must be a nonzero multiple of four at most 4096 bytes",
             ));
         }
-        let compressed = if zlib == ZlibPolicy::Never {
-            None
-        } else {
-            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
-            encoder.write_all(pixels)?;
-            Some(encoder.finish()?)
-        };
+
+        let local_auto = transport == GraphicsTransport::Auto
+            && self.local_media
+            && pixels.len() >= LOCAL_TRANSPORT_THRESHOLD;
+        let local_transport = matches!(
+            transport,
+            GraphicsTransport::SharedMemory | GraphicsTransport::TemporaryFile
+        ) || local_auto;
+        let compressed =
+            if zlib == ZlibPolicy::Always || (zlib == ZlibPolicy::Adaptive && !local_transport) {
+                let mut encoder = ZlibEncoder::new(Vec::new(), Compression::fast());
+                encoder.write_all(pixels)?;
+                Some(encoder.finish()?)
+            } else {
+                None
+            };
         let use_compressed = match (&compressed, zlib) {
             (Some(_), ZlibPolicy::Always) => true,
             (Some(bytes), ZlibPolicy::Adaptive) => bytes.len() < pixels.len(),
@@ -420,8 +430,6 @@ impl KittyPresenter {
             (pixels, "")
         };
 
-        let local_auto =
-            transport == GraphicsTransport::Auto && self.local_media && payload.len() >= 4096;
         if transport == GraphicsTransport::SharedMemory || local_auto {
             match self.write_shared_payload(payload) {
                 Ok(name) => {
@@ -1663,6 +1671,58 @@ mod tests {
             text.starts_with("\u{1b}_Ga=f,f=24,i=1,q=2,r=2,x=2,y=3,s=100,v=100,X=1,o=z,t=d,m=")
         );
         assert!(text.ends_with("\u{1b}\\"));
+    }
+
+    #[test]
+    fn kitty_never_policy_skips_compression() {
+        let mut presenter = KittyPresenter::new();
+        let pixels = vec![0xa5; 30_000];
+        let mut output = Vec::new();
+        let bytes = presenter
+            .transmit_with(
+                &mut output,
+                "a=f,f=24,i=1,q=2,r=1,x=0,y=0,s=100,v=100,X=1",
+                &pixels,
+                true,
+                ZlibPolicy::Never,
+                GraphicsTransport::Direct,
+                4096,
+            )
+            .unwrap();
+        assert_eq!(bytes, pixels.len());
+        assert!(!String::from_utf8(output).unwrap().contains(",o=z"));
+    }
+
+    #[test]
+    fn kitty_adaptive_policy_skips_compression_for_shared_memory() {
+        let mut presenter = KittyPresenter::new();
+        let pixels = vec![0xa5; 30_000];
+        let mut output = Vec::new();
+        let bytes = presenter
+            .transmit_with(
+                &mut output,
+                "a=f,f=24,i=1,q=2,r=1,x=0,y=0,s=100,v=100,X=1",
+                &pixels,
+                true,
+                ZlibPolicy::Adaptive,
+                GraphicsTransport::SharedMemory,
+                4096,
+            )
+            .unwrap();
+        assert_eq!(bytes, pixels.len());
+        let text = String::from_utf8(output).unwrap();
+        assert!(!text.contains(",o=z"));
+        let encoded_name = text
+            .split_once(';')
+            .unwrap()
+            .1
+            .strip_suffix("\u{1b}\\")
+            .unwrap();
+        let name = base64::engine::general_purpose::STANDARD
+            .decode(encoded_name)
+            .unwrap();
+        let name = CString::new(name).unwrap();
+        assert_eq!(unsafe { libc::shm_unlink(name.as_ptr()) }, 0);
     }
 
     #[test]

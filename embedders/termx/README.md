@@ -4,12 +4,10 @@ TermX is a native reference embedder for the public `tinyx.h` API. It exposes
 in-memory TinyX clients through a Unix-domain X11 socket, presents the memory
 framebuffer using the Kitty graphics protocol, and translates terminal keyboard
 and mouse events into TinyX input injection calls. It applies TinyX damage
-rectangles directly to Kitty's root animation frame using compressed raw RGB
-data.
-When running in a local Kitty window, larger payloads use POSIX shared memory
-to avoid base64 transfer through the terminal stream. A temporary file is used
-if shared-memory creation fails, and direct transfer remains the remote and
-small-payload fallback.
+rectangles directly to Kitty's root animation frame using raw RGB data. Local
+updates of at least 256 KiB use uncompressed POSIX shared memory; a temporary
+file is used if shared-memory creation fails. Smaller and remote updates use
+direct transfer with adaptive zlib compression.
 
 The Cargo build invokes the repository's CMake build and statically links
 `libtinyx.a`. X.Org protocol headers must be installed. If they are outside the
@@ -73,12 +71,21 @@ may create one run directory. Each client produces exact `client-N-c2s.bin` and
 
 Run `termx --benchmark-kitty [PATH]` inside Kitty to measure the graphics
 transport without starting TinyX clients. Results default to
-`/tmp/termx-kitty-benchmark-<pid>.csv`; an explicit path overrides that file. It reports acknowledgement latency for base
-frames and cursor-sized, text-line, window-sized, and full-screen damage
-updates across 320×200, 640×400, 1280×720, 1920×1080, and the current terminal
-pixel dimensions. Each size is tested with disabled, adaptive, and forced zlib;
-direct, temporary-file, and shared-memory transport; and 1024- and 4096-byte
-direct chunks.
+`/tmp/termx-kitty-benchmark-<pid>.csv`; an explicit path overrides that file.
+It reports acknowledgement latency for base frames and cursor-sized, text-line,
+window-sized, and full-screen damage updates across 320×200, 640×400,
+1280×720, 1920×1080, and the current terminal pixel dimensions. Each size is
+tested with disabled, adaptive, and forced zlib; direct, temporary-file, and
+shared-memory transport; and 1024- and 4096-byte direct chunks.
+
+Generate one p50/p90 chart per screen-size and update-case pair with:
+
+```sh
+python3 embedders/termx/plot-benchmark.py results.csv
+```
+
+`benchmarks/` contains the initial fullscreen-Kitty baseline CSV and its
+multi-page chart PDF.
 
 Press Control-C to exit. The X screen uses the full terminal pixel area and is
 resized when that area changes. TinyX replaces its framebuffer and notifies
