@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-only
+
 use super::*;
 use std::os::fd::AsRawFd;
 

@@ -1,5 +1,10 @@
 # TinyX embedders
 
+The project-authored sample embedder files are dual-licensed under MIT or
+GPL-3.0-only. See [`LICENSE-MIT`](LICENSE-MIT) and the repository
+[`LICENSE.md`](../LICENSE.md). An executable linked with `libtinyx.a` remains
+subject to GPL-3.0-only.
+
 TinyX is a library, not a standalone display server. A runnable embedder owns:
 
 - acquiring X11 clients and moving their ordered byte streams through

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: MIT OR GPL-3.0-only */
 /* Minimal headless embedder using only the public TinyX API. */
 #include <stdio.h>
 

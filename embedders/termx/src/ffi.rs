@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-only
+
 use std::ffi::{c_char, c_int, c_void};
 use std::ptr::{self, NonNull};
 

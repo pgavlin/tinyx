@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT OR GPL-3.0-only
 """Render TermX Kitty benchmark CSV as per-(screen size, update case) bar charts."""
 
 import argparse

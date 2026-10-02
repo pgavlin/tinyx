@@ -306,6 +306,8 @@ write_basic_package_version_file(
 install(TARGETS tinyx EXPORT TinyXTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 install(FILES include/tinyx.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES COPYING LICENSE.md
+    DESTINATION "${CMAKE_INSTALL_DOCDIR}")
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/TinyXConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/TinyXConfigVersion.cmake"

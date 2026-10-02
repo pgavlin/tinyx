@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR GPL-3.0-only
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};

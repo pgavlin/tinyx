@@ -35,4 +35,7 @@ reference but are not built.
 Licensing
 ---------
 
-See `COPYING` and individual source-file notices.
+The TinyX library and TinyX-specific core changes are GPL-3.0-only. The sample
+embedders are available under either MIT or GPL-3.0-only; executables linked
+with TinyX remain subject to GPL-3.0-only. See `LICENSE.md`, `COPYING`, and
+individual source-file notices.
