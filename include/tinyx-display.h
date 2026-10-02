@@ -32,6 +32,9 @@ typedef struct {
     uint32_t redMask;
     uint32_t greenMask;
     uint32_t blueMask;
+    uint32_t transparencyType;
+    uint32_t transparentValue;
+    int32_t layer;
 } TinyXMemoryVisualConfig;
 
 typedef struct {

@@ -48,6 +48,8 @@ struct ScreenConfig {
     depth_count: usize,
     root_depth_index: usize,
     root_visual_index: usize,
+    overlay_visuals: *const c_void,
+    overlay_visual_count: usize,
 }
 
 #[repr(C)]
@@ -208,6 +210,8 @@ impl Server {
             depth_count: 0,
             root_depth_index: 0,
             root_visual_index: 0,
+            overlay_visuals: ptr::null(),
+            overlay_visual_count: 0,
         };
         let mut config = Config {
             struct_size: 0,

@@ -359,6 +359,17 @@ CreateColormap(Colormap mid, ScreenPtr pScreen, VisualPtr pVisual,
             pmap->numPixelsBlue[client] = size;
         }
     }
+    if (alloc == AllocNone &&
+        pVisual->transparencyType == VisualTransparencyPixel) {
+        Pixel transparent = pVisual->transparentValue;
+
+        if (transparent >= (Pixel)pVisual->ColormapEntries) {
+            free(pmap);
+            return (BadValue);
+        }
+        pmap->red[transparent].refcnt = AllocReserved;
+        pmap->freeRed--;
+    }
     if (!AddResource(mid, RT_COLORMAP, (pointer) pmap))
         return (BadAlloc);
     /* If the device wants a chance to initialize the colormap in any way,
@@ -666,6 +677,9 @@ FreeCell(ColormapPtr pmap, Pixel i, int channel)
         pCount = &pmap->freeBlue;
         break;
     }
+    /* A visual's transparent pixel is server-owned for the map lifetime. */
+    if (pent->refcnt == AllocReserved)
+        return;
     /* If it's not privately allocated and it's not time to free it, just
      * decrement the count */
     if (pent->refcnt > 1)

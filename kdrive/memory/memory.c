@@ -230,6 +230,9 @@ TinyXMemoryInitVisuals(VisualPtr *visualOut, DepthPtr *depthOut,
             visual->offsetRed = TinyXMemoryMaskShift(source->redMask);
             visual->offsetGreen = TinyXMemoryMaskShift(source->greenMask);
             visual->offsetBlue = TinyXMemoryMaskShift(source->blueMask);
+            visual->transparencyType = source->transparencyType;
+            visual->transparentValue = source->transparentValue;
+            visual->layer = source->layer;
             depths[d].vids[v] = visual->vid;
             if (d == memoryConfig.rootDepthIndex &&
                 v == memoryConfig.rootVisualIndex) {

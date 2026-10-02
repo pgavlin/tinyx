@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 3
+#define TINYX_API_VERSION_MINOR 4
 #define TINYX_NO_TIMEOUT UINT32_MAX
 
 #define TINYX_MIN_KEYCODE 8
@@ -89,6 +89,24 @@ typedef struct tinyx_depth_config {
     size_t visual_count;
 } tinyx_depth_config;
 
+typedef enum tinyx_overlay_transparency_type {
+    TINYX_OVERLAY_TRANSPARENCY_PIXEL = 1
+} tinyx_overlay_transparency_type;
+
+/*
+ * Optional semantics for one visual selected by its indexes in the screen's
+ * depth topology. Pixel transparency reserves transparent_value from normal
+ * allocation in each AllocNone colormap created for that visual. It does not
+ * imply that TinyX composites the visual as an overlay plane.
+ */
+typedef struct tinyx_overlay_visual_config {
+    size_t depth_index;
+    size_t visual_index;
+    uint32_t transparency_type;
+    uint32_t transparent_value;
+    int32_t layer;
+} tinyx_overlay_visual_config;
+
 typedef struct tinyx_framebuffer_config {
     uint32_t struct_size;
     uint32_t width;
@@ -118,6 +136,8 @@ typedef struct tinyx_screen_config {
     size_t depth_count;
     size_t root_depth_index;
     size_t root_visual_index;
+    const tinyx_overlay_visual_config *overlay_visuals;
+    size_t overlay_visual_count;
 } tinyx_screen_config;
 
 typedef struct tinyx_config {

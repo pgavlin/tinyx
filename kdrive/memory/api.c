@@ -275,10 +275,11 @@ ValidateScreen(const tinyx_screen_config *screen)
 
     if (!screen || screen->struct_size < sizeof(*screen) ||
         !ValidateFramebuffer(&screen->framebuffer) ||
-        (!!screen->depths != !!screen->depth_count))
+        (!!screen->depths != !!screen->depth_count) ||
+        (!!screen->overlay_visuals != !!screen->overlay_visual_count))
         return 0;
     if (!screen->depth_count)
-        return 1;
+        return screen->overlay_visual_count == 0;
     if (screen->depth_count > 32 ||
         screen->root_depth_index >= screen->depth_count)
         return 0;
@@ -304,6 +305,32 @@ ValidateScreen(const tinyx_screen_config *screen)
     }
     if (!hasDepthOne)
         return 0;
+
+    for (v = 0; v < screen->overlay_visual_count; v++) {
+        const tinyx_overlay_visual_config *overlay =
+            &screen->overlay_visuals[v];
+        const tinyx_depth_config *depth;
+        const tinyx_visual_config *visual;
+
+        if (overlay->depth_index >= screen->depth_count)
+            return 0;
+        depth = &screen->depths[overlay->depth_index];
+        if (overlay->visual_index >= depth->visual_count)
+            return 0;
+        visual = &depth->visuals[overlay->visual_index];
+        if (overlay->transparency_type !=
+                TINYX_OVERLAY_TRANSPARENCY_PIXEL ||
+            (visual->visual_class != TINYX_VISUAL_PSEUDO_COLOR &&
+             visual->visual_class != TINYX_VISUAL_GRAY_SCALE) ||
+            overlay->transparent_value >= visual->colormap_entries)
+            return 0;
+        for (other = 0; other < v; other++)
+            if (screen->overlay_visuals[other].depth_index ==
+                    overlay->depth_index &&
+                screen->overlay_visuals[other].visual_index ==
+                    overlay->visual_index)
+                return 0;
+    }
 
     rootDepth = &screen->depths[screen->root_depth_index];
     if (screen->root_visual_index >= rootDepth->visual_count)
@@ -375,6 +402,16 @@ CopyTopology(tinyx_server *server, const tinyx_screen_config *screen)
             visuals[v].greenMask = sourceDepth->visuals[v].green_mask;
             visuals[v].blueMask = sourceDepth->visuals[v].blue_mask;
         }
+    }
+    for (v = 0; v < screen->overlay_visual_count; v++) {
+        const tinyx_overlay_visual_config *source =
+            &screen->overlay_visuals[v];
+        TinyXMemoryVisualConfig *target = (TinyXMemoryVisualConfig *)
+            &server->depths[source->depth_index].visuals[source->visual_index];
+
+        target->transparencyType = source->transparency_type;
+        target->transparentValue = source->transparent_value;
+        target->layer = source->layer;
     }
     return 1;
 }

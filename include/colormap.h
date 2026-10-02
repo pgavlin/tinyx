@@ -62,6 +62,7 @@ SOFTWARE.
 #define PSEUDOMAP 3
 #define AllocPrivate (-1)
 #define AllocTemporary (-2)
+#define AllocReserved (-3)
 #define DynamicClass  1
 
 /* Values for the flags field of a colormap. These should have 1 bit set

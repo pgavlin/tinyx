@@ -36,8 +36,9 @@ The first public API should provide:
 The first version does not attempt to provide concurrent server instances,
 thread safety, native listeners, generation reset, or a public font-provider
 interface. API 1.1 added runtime resizing, API 1.2 added host-supplied physical
-screen dimensions, and the breaking prerelease API 1.3 separates mutable
-framebuffer state from creation-time depth and visual topology.
+screen dimensions, the breaking prerelease API 1.3 separates mutable
+framebuffer state from creation-time depth and visual topology, and API 1.4
+adds visual-specific transparent-overlay allocation semantics.
 
 ## Public header shape
 
@@ -59,7 +60,7 @@ extern "C" {
 #endif
 
 #define TINYX_API_VERSION_MAJOR 1
-#define TINYX_API_VERSION_MINOR 3
+#define TINYX_API_VERSION_MINOR 4
 
 typedef struct tinyx_server tinyx_server;
 typedef struct tinyx_client tinyx_client;
@@ -161,6 +162,18 @@ typedef struct tinyx_depth_config {
     size_t visual_count;
 } tinyx_depth_config;
 
+typedef enum tinyx_overlay_transparency_type {
+    TINYX_OVERLAY_TRANSPARENCY_PIXEL = 1
+} tinyx_overlay_transparency_type;
+
+typedef struct tinyx_overlay_visual_config {
+    size_t depth_index;
+    size_t visual_index;
+    uint32_t transparency_type;
+    uint32_t transparent_value;
+    int32_t layer;
+} tinyx_overlay_visual_config;
+
 typedef struct tinyx_framebuffer_config {
     uint32_t struct_size;
     uint32_t width;
@@ -179,6 +192,8 @@ typedef struct tinyx_screen_config {
     size_t depth_count;
     size_t root_depth_index;
     size_t root_visual_index;
+    const tinyx_overlay_visual_config *overlay_visuals;
+    size_t overlay_visual_count;
 } tinyx_screen_config;
 
 void tinyx_framebuffer_config_init(tinyx_framebuffer_config *config);
@@ -240,7 +255,16 @@ The current memory presenter requires the root to remain depth-24 TrueColor in
 32-bpp storage with the documented RGB masks. Non-root FB-supported depths may
 use different storage widths; in particular, depth 2 may use 8 bpp and depth
 12 may use 16 bpp. Alternate-depth colormaps, windows, pixmaps, GCs, and core
-drawing are real server resources. Compositing indexed alternate-depth windows
+drawing are real server resources.
+
+An optional overlay descriptor identifies one indexed dynamic visual by its
+depth and visual indexes. API 1.4 supports pixel transparency only. In each
+fresh `AllocNone` colormap for that visual, `transparent_value` is server-owned
+and unavailable to ordinary client allocation; other visuals, including other
+visuals at the same depth, retain core X allocation behavior. `layer` records
+the host's plane ordering metadata but does not affect rendering. Transparent
+mask semantics are unsupported. TinyX does not infer configuration from a
+`SERVER_OVERLAY_VISUALS` root property, and compositing alternate-depth windows
 into the presented root framebuffer is not an overlay or plane-group contract.
 
 `tinyx_config_init()` records the API version and installs server defaults. The

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(TinyX VERSION 1.3 LANGUAGES C)
+project(TinyX VERSION 1.4 LANGUAGES C)
 
 # TinyX retains K&R-style definitions that newer C modes reject.
 set(CMAKE_C_STANDARD 99)

@@ -62,6 +62,9 @@ typedef struct _PixmapFormat {
     unsigned char	scanlinePad;
     } PixmapFormatRec;
 
+#define VisualTransparencyNone  0
+#define VisualTransparencyPixel 1
+
 typedef struct _Visual {
     VisualID		vid;
     short		class;
@@ -72,6 +75,9 @@ typedef struct _Visual {
 				 * it may have more or fewer */
     unsigned long	redMask, greenMask, blueMask;
     int			offsetRed, offsetGreen, offsetBlue;
+    short               transparencyType;
+    unsigned long       transparentValue;
+    int                 layer;
   } VisualRec;
 
 typedef struct _Depth {

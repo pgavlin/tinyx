@@ -11,6 +11,8 @@
 #define CREATE_GC 55
 #define POLY_FILL_RECTANGLE 70
 #define CREATE_COLORMAP 78
+#define ALLOC_COLOR_CELLS 86
+#define STORE_COLORS 89
 #define CW_BORDER_PIXEL UINT32_C(0x0008)
 #define CW_COLORMAP UINT32_C(0x2000)
 
@@ -75,6 +77,77 @@ send_request(tinyx_server *server, tinyx_client *client,
         fprintf(stderr, "request %u failed with X error %u\n",
                 request[0], output[1]);
     return 0;
+}
+
+static int
+create_colormap(tinyx_server *server, tinyx_client *client, uint32_t root,
+                uint32_t visual, uint32_t cmap)
+{
+    unsigned char request[16] = {CREATE_COLORMAP, 0};
+
+    put_be16(request + 2, 4);
+    put_be32(request + 4, cmap);
+    put_be32(request + 8, root);
+    put_be32(request + 12, visual);
+    return send_request(server, client, request, sizeof(request));
+}
+
+static int
+alloc_and_store_cells(tinyx_server *server, tinyx_client *client,
+                      uint32_t cmap, uint16_t cellCount,
+                      uint32_t firstPixel)
+{
+    unsigned char request[12] = {ALLOC_COLOR_CELLS, 0};
+    unsigned char *reply = NULL;
+    unsigned char *store = NULL;
+    size_t replySize, count, storeSize;
+    uint32_t i;
+    int result = 0;
+
+    put_be16(request + 2, 3);
+    put_be32(request + 4, cmap);
+    put_be16(request + 8, cellCount);
+    put_be16(request + 10, 0);
+    if (tinyx_client_send(client, request, sizeof(request), &count) !=
+            TINYX_OK || count != sizeof(request) || !pump(server))
+        goto done;
+
+    replySize = tinyx_client_receive_pending(client);
+    if (replySize != 32 + (size_t)cellCount * 4 ||
+        !(reply = malloc(replySize)) ||
+        tinyx_client_receive(client, reply, replySize, &count) != TINYX_OK ||
+        count != replySize || reply[0] != 1 ||
+        be32(reply + 4) != cellCount || be16(reply + 8) != cellCount ||
+        be16(reply + 10) != 0)
+        goto done;
+    for (i = 0; i < cellCount; i++)
+        if (be32(reply + 32 + i * 4) != firstPixel + i)
+            goto done;
+
+    storeSize = 8 + (size_t)cellCount * 12;
+    store = calloc(1, storeSize);
+    if (!store)
+        goto done;
+    store[0] = STORE_COLORS;
+    put_be16(store + 2, (uint16_t)(storeSize / 4));
+    put_be32(store + 4, cmap);
+    for (i = 0; i < cellCount; i++) {
+        unsigned char *item = store + 8 + i * 12;
+
+        put_be32(item, firstPixel + i);
+        put_be16(item + 4, (uint16_t)i);
+        put_be16(item + 6, (uint16_t)(i * 3));
+        put_be16(item + 8, (uint16_t)(i * 7));
+        item[10] = 7;
+    }
+    if (!send_request(server, client, store, storeSize))
+        goto done;
+    result = 1;
+
+done:
+    free(store);
+    free(reply);
+    return result;
 }
 
 static int
@@ -168,7 +241,11 @@ main(void)
         'B', 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0
     };
     static const tinyx_visual_config depth2Visuals[] = {
+        {TINYX_VISUAL_PSEUDO_COLOR, 8, 4, 0, 0, 0},
         {TINYX_VISUAL_PSEUDO_COLOR, 8, 4, 0, 0, 0}
+    };
+    static const tinyx_visual_config depth8Visuals[] = {
+        {TINYX_VISUAL_PSEUDO_COLOR, 8, 256, 0, 0, 0}
     };
     static const tinyx_visual_config depth12Visuals[] = {
         {TINYX_VISUAL_PSEUDO_COLOR, 8, 4096, 0, 0, 0}
@@ -179,12 +256,19 @@ main(void)
     };
     static const tinyx_depth_config depths[] = {
         {1, 1, NULL, 0},
-        {2, 8, depth2Visuals, 1},
+        {2, 8, depth2Visuals, 2},
+        {8, 8, depth8Visuals, 1},
         {12, 16, depth12Visuals, 1},
         {24, 32, depth24Visuals, 1}
     };
+    static const tinyx_overlay_visual_config overlays[] = {
+        {1, 0, TINYX_OVERLAY_TRANSPARENCY_PIXEL, 0, 1},
+        {2, 0, TINYX_OVERLAY_TRANSPARENCY_PIXEL, 0, 1}
+    };
     tinyx_screen_config screen;
     tinyx_depth_config invalidDepths[sizeof(depths) / sizeof(depths[0])];
+    tinyx_overlay_visual_config invalidOverlays[
+        sizeof(overlays) / sizeof(overlays[0])];
     tinyx_config config;
     tinyx_client_config clientConfig;
     tinyx_error error;
@@ -200,7 +284,8 @@ main(void)
     size_t count;
     uint32_t resourceBase;
     uint32_t root;
-    uint32_t visual2 = 0, visual12 = 0, visual24 = 0;
+    uint32_t visual2 = 0, visual2Ordinary = 0, visual8 = 0;
+    uint32_t visual12 = 0, visual24 = 0;
     uint32_t nextId;
     int result = 1;
     int stage = 1;
@@ -209,8 +294,10 @@ main(void)
     screen.framebuffer.width = 64;
     screen.framebuffer.height = 64;
     screen.depth_count = sizeof(depths) / sizeof(depths[0]);
-    screen.root_depth_index = 3;
+    screen.root_depth_index = 4;
     screen.root_visual_index = 0;
+    screen.overlay_visuals = overlays;
+    screen.overlay_visual_count = sizeof(overlays) / sizeof(overlays[0]);
 
     memcpy(invalidDepths, depths, sizeof(depths));
     invalidDepths[1].bits_per_pixel = 2;
@@ -222,6 +309,16 @@ main(void)
         goto done;
 
     screen.depths = depths;
+    memcpy(invalidOverlays, overlays, sizeof(overlays));
+    invalidOverlays[0].transparency_type = 2;
+    screen.overlay_visuals = invalidOverlays;
+    tinyx_config_init(&config);
+    config.initial_screen = &screen;
+    if (tinyx_server_create(&config, &server, &error) !=
+            TINYX_ERROR_INVALID_ARGUMENT || server)
+        goto done;
+
+    screen.overlay_visuals = overlays;
     tinyx_config_init(&config);
     config.initial_screen = &screen;
     if (tinyx_server_create(&config, &server, &error) != TINYX_OK)
@@ -245,27 +342,28 @@ main(void)
     if (replySize < 40 || !(reply = malloc(replySize)))
         goto done;
     if (tinyx_client_receive(client, reply, replySize, &count) != TINYX_OK ||
-        count != replySize || reply[0] != 1 || reply[29] != 4)
+        count != replySize || reply[0] != 1 || reply[29] != 5)
         goto done;
     stage = 3;
 
     resourceBase = be32(reply + 12);
     format = reply + 40 + ((be16(reply + 24) + 3) & ~(size_t)3);
-    if (format + 32 > reply + replySize)
+    if (format + 40 > reply + replySize)
         goto done;
     if (format[0] != 1 || format[1] != 1 || format[2] != 32 ||
         format[8] != 2 || format[9] != 8 || format[10] != 32 ||
-        format[16] != 12 || format[17] != 16 || format[18] != 32 ||
-        format[24] != 24 || format[25] != 32 || format[26] != 32)
+        format[16] != 8 || format[17] != 8 || format[18] != 32 ||
+        format[24] != 12 || format[25] != 16 || format[26] != 32 ||
+        format[32] != 24 || format[33] != 32 || format[34] != 32)
         goto done;
     stage = 4;
 
-    screenOffset = (size_t)(format - reply) + 32;
+    screenOffset = (size_t)(format - reply) + 40;
     if (screenOffset + 40 > replySize)
         goto done;
     rootInfo = reply + screenOffset;
     root = be32(rootInfo);
-    if (rootInfo[38] != 24 || rootInfo[39] != 4)
+    if (rootInfo[38] != 24 || rootInfo[39] != 5)
         goto done;
     depthInfo = rootInfo + 40;
 
@@ -273,12 +371,22 @@ main(void)
         be16(depthInfo + 2) != 0)
         goto done;
     depthInfo += 8;
-    if (depthInfo + 32 > reply + replySize || depthInfo[0] != 2 ||
-        be16(depthInfo + 2) != 1 ||
+    if (depthInfo + 56 > reply + replySize || depthInfo[0] != 2 ||
+        be16(depthInfo + 2) != 2 ||
         !check_visual(depthInfo + 8, TINYX_VISUAL_PSEUDO_COLOR, 8, 4,
+                      0, 0, 0) ||
+        !check_visual(depthInfo + 32, TINYX_VISUAL_PSEUDO_COLOR, 8, 4,
                       0, 0, 0))
         goto done;
     visual2 = be32(depthInfo + 8);
+    visual2Ordinary = be32(depthInfo + 32);
+    depthInfo += 56;
+    if (depthInfo + 32 > reply + replySize || depthInfo[0] != 8 ||
+        be16(depthInfo + 2) != 1 ||
+        !check_visual(depthInfo + 8, TINYX_VISUAL_PSEUDO_COLOR, 8, 256,
+                      0, 0, 0))
+        goto done;
+    visual8 = be32(depthInfo + 8);
     depthInfo += 32;
     if (depthInfo + 32 > reply + replySize || depthInfo[0] != 12 ||
         be16(depthInfo + 2) != 1 ||
@@ -300,8 +408,20 @@ main(void)
 
     nextId = resourceBase;
     if (!create_resources(server, client, root, visual2, 2, &nextId) ||
+        !create_resources(server, client, root, visual8, 8, &nextId) ||
         !create_resources(server, client, root, visual12, 12, &nextId) ||
         !create_resources(server, client, root, visual24, 24, &nextId))
+        goto done;
+    stage = 6;
+
+    if (!create_colormap(server, client, root, visual2, nextId) ||
+        !alloc_and_store_cells(server, client, nextId++, 3, 1) ||
+        !create_colormap(server, client, root, visual8, nextId) ||
+        !alloc_and_store_cells(server, client, nextId++, 255, 1) ||
+        !create_colormap(server, client, root, visual12, nextId) ||
+        !alloc_and_store_cells(server, client, nextId++, 4096, 0) ||
+        !create_colormap(server, client, root, visual2Ordinary, nextId) ||
+        !alloc_and_store_cells(server, client, nextId++, 4, 0))
         goto done;
 
     result = 0;

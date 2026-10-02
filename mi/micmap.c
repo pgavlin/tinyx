@@ -558,6 +558,9 @@ miDoInitVisuals(VisualPtr *visualp, DepthPtr *depthp, int *nvisualp,
 	    visual->ColormapEntries = 1 << d;
 	    visual->nplanes = d;
 	    visual->vid = *vid = FakeClientID (0);
+	    visual->transparencyType = VisualTransparencyNone;
+	    visual->transparentValue = 0;
+	    visual->layer = 0;
 	    switch (visual->class) {
 	    case PseudoColor:
 	    case GrayScale:

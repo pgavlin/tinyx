@@ -816,8 +816,12 @@ The framebuffer is exposed as read-only host data in native-endian depth-24,
 depths and exact visuals while retaining that fixed root presentation format.
 The memory DDX materializes them as real `DepthRec` and `VisualRec` objects, so
 clients can create alternate-depth colormaps, windows, pixmaps, and GCs. The
-configuration is copied at creation and remains immutable; indexed overlay or
-plane-group composition into the root framebuffer is not implied.
+configuration is copied at creation and remains immutable. An optional overlay
+record can identify an indexed visual whose transparent pixel remains
+server-owned in each `AllocNone` colormap. This policy is attached to the
+visual identity rather than its depth and is independent of root properties.
+Transparent-mask allocation and indexed overlay or plane-group composition
+into the root framebuffer are not implemented.
 
 Mutable dimensions, physical dimensions, stride, and storage occupy a separate
 framebuffer descriptor used at creation and resize. Resize invalidates the
