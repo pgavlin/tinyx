@@ -35,7 +35,6 @@ use input::KeyboardState;
 use serde::Deserialize;
 
 const FRAME_INTERVAL: Duration = Duration::from_millis(33);
-const LOCAL_TRANSPORT_THRESHOLD: usize = 256 * 1024;
 const FALLBACK_CELL_WIDTH: u32 = 8;
 const FALLBACK_CELL_HEIGHT: u32 = 16;
 const HELP: &str = concat!(
@@ -404,9 +403,7 @@ impl KittyPresenter {
             ));
         }
 
-        let local_auto = transport == GraphicsTransport::Auto
-            && self.local_media
-            && pixels.len() >= LOCAL_TRANSPORT_THRESHOLD;
+        let local_auto = transport == GraphicsTransport::Auto && self.local_media;
         let local_transport = matches!(
             transport,
             GraphicsTransport::SharedMemory | GraphicsTransport::TemporaryFile
@@ -1710,6 +1707,40 @@ mod tests {
             )
             .unwrap();
         assert_eq!(bytes, pixels.len());
+        let text = String::from_utf8(output).unwrap();
+        assert!(!text.contains(",o=z"));
+        let encoded_name = text
+            .split_once(';')
+            .unwrap()
+            .1
+            .strip_suffix("\u{1b}\\")
+            .unwrap();
+        let name = base64::engine::general_purpose::STANDARD
+            .decode(encoded_name)
+            .unwrap();
+        let name = CString::new(name).unwrap();
+        assert_eq!(unsafe { libc::shm_unlink(name.as_ptr()) }, 0);
+    }
+
+    #[test]
+    fn kitty_auto_policy_uses_shared_memory_for_small_local_updates() {
+        let mut presenter = KittyPresenter::new();
+        presenter.local_media = true;
+        let pixels = vec![0xa5; 768];
+        let mut output = Vec::new();
+        let bytes = presenter
+            .transmit_with(
+                &mut output,
+                "a=f,f=24,i=1,q=2,r=1,x=0,y=0,s=16,v=16,X=1",
+                &pixels,
+                true,
+                ZlibPolicy::Adaptive,
+                GraphicsTransport::Auto,
+                4096,
+            )
+            .unwrap();
+        assert_eq!(bytes, pixels.len());
+        assert_eq!(presenter.last_medium, "shared-memory");
         let text = String::from_utf8(output).unwrap();
         assert!(!text.contains(",o=z"));
         let encoded_name = text
