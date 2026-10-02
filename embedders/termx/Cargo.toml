@@ -7,11 +7,10 @@ license = "MIT OR GPL-3.0-only"
 publish = false
 
 [dependencies]
-base64 = "0.22"
 crossterm = "0.28"
-flate2 = "1"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
+tilcayo = "0.1"
 toml = "0.8"
 
 [build-dependencies]

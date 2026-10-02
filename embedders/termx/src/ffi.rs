@@ -395,8 +395,20 @@ impl Server {
         Ok(info)
     }
 
-    pub fn rgb(&self, rect: DamageRect) -> Result<Vec<u8>, String> {
+    pub fn update_rgb(
+        &self,
+        rgb: &mut [u8],
+        rgb_stride: usize,
+        rect: DamageRect,
+    ) -> Result<(), String> {
         let info = self.framebuffer_info()?;
+        if rgb_stride < info.width as usize * 3
+            || rgb_stride
+                .checked_mul(info.height as usize)
+                .is_none_or(|required| required > rgb.len())
+        {
+            return Err("RGB destination is too small for the framebuffer".to_owned());
+        }
         if rect.x < 0
             || rect.y < 0
             || rect.width == 0
@@ -408,22 +420,24 @@ impl Server {
         }
 
         let pixels = unsafe { std::slice::from_raw_parts(info.pixels.cast::<u8>(), info.size) };
-        let mut rgb = Vec::with_capacity(rect.width as usize * rect.height as usize * 3);
         for y in rect.y as usize..(rect.y as usize + rect.height as usize) {
-            let x = rect.x as usize * 4;
-            let row = &pixels[y * info.stride_bytes + x..][..rect.width as usize * 4];
-            for bytes in row.chunks_exact(4) {
+            let source_x = rect.x as usize * 4;
+            let source = &pixels[y * info.stride_bytes + source_x..][..rect.width as usize * 4];
+            let destination_x = rect.x as usize * 3;
+            let destination = &mut rgb[y * rgb_stride + destination_x..][..rect.width as usize * 3];
+            for (source, destination) in source.chunks_exact(4).zip(destination.chunks_exact_mut(3))
+            {
                 let pixel = match info.byte_order {
-                    0 => u32::from_le_bytes(bytes.try_into().unwrap()),
-                    1 => u32::from_be_bytes(bytes.try_into().unwrap()),
+                    0 => u32::from_le_bytes(source.try_into().unwrap()),
+                    1 => u32::from_be_bytes(source.try_into().unwrap()),
                     _ => return Err("TinyX returned an invalid framebuffer byte order".to_owned()),
                 };
-                rgb.push(((pixel & info.red_mask) >> 16) as u8);
-                rgb.push(((pixel & info.green_mask) >> 8) as u8);
-                rgb.push((pixel & info.blue_mask) as u8);
+                destination[0] = ((pixel & info.red_mask) >> 16) as u8;
+                destination[1] = ((pixel & info.green_mask) >> 8) as u8;
+                destination[2] = (pixel & info.blue_mask) as u8;
             }
         }
-        Ok(rgb)
+        Ok(())
     }
 }
 
@@ -511,7 +525,21 @@ mod tests {
                 height: 48
             }]
         );
-        let rgb = server.rgb(damage[0]).unwrap();
+        let mut rgb = vec![0x7f_u8; 80 * 48 * 3];
+        server
+            .update_rgb(
+                &mut rgb,
+                80 * 3,
+                DamageRect {
+                    x: 1,
+                    y: 1,
+                    width: 2,
+                    height: 2,
+                },
+            )
+            .unwrap();
+        assert!(rgb[..80 * 3].iter().all(|byte| *byte == 0x7f));
+        server.update_rgb(&mut rgb, 80 * 3, damage[0]).unwrap();
         assert_eq!(rgb.len(), 80 * 48 * 3);
         let mut client = server.open_client().unwrap();
         assert_eq!(client.send(&setup), Ok(setup.len()));

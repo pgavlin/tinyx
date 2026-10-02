@@ -74,8 +74,8 @@ pixels.
 
 `embedders/termx` is a complete native embedder for the public C API. Its Cargo
 build invokes CMake, listens for ordinary X11 clients on a Unix-domain socket,
-presents framebuffer damage with the Kitty graphics protocol, and injects
-terminal keyboard and mouse input:
+uses the Tilcayo crate to present framebuffer damage with the Kitty graphics
+protocol, and injects terminal keyboard and mouse input:
 
 ```sh
 cargo run --manifest-path embedders/termx/Cargo.toml --release

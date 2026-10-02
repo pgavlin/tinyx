@@ -2,6 +2,9 @@
 
 use super::*;
 use std::os::fd::AsRawFd;
+use tilcayo::kitty::{
+    GraphicsTransport, KittyPresenter, KittyTransmitter, TransferOptions, ZlibPolicy, select_frame,
+};
 
 const BASE_SAMPLES: usize = 2;
 const DAMAGE_SAMPLES: usize = 4;
@@ -56,9 +59,9 @@ pub fn run(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let screens = benchmark_screens(native);
     let terminal = BenchmarkTerminal::enter()?;
     let mut stdout = io::stdout().lock();
-    let mut presenter = KittyPresenter::new();
-    presenter.image_id = std::process::id().max(1);
-    let barrier_id = presenter.image_id.checked_add(1).unwrap_or(1);
+    let mut transmitter = KittyTransmitter::new(false);
+    let image_id = std::process::id().max(1);
+    let barrier_id = image_id.checked_add(1).unwrap_or(1);
     let mut results = Vec::new();
 
     for screen in screens {
@@ -71,27 +74,26 @@ pub fn run(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
             for _ in 0..BASE_SAMPLES {
                 write!(stdout, "\x1b[H")?;
                 let start = Instant::now();
-                payload_bytes = presenter.transmit_with(
+                let transfer = transmitter.transmit(
                     &mut stdout,
                     &format!(
                         "a=T,f=24,s={},v={},i={},p=1,q=2,C=1,c={},r={}",
-                        screen.width,
-                        screen.height,
-                        presenter.image_id,
-                        placement.columns,
-                        placement.rows
+                        screen.width, screen.height, image_id, placement.columns, placement.rows
                     ),
                     &base,
                     false,
-                    config.zlib,
-                    config.transport,
-                    config.chunk_size,
+                    TransferOptions {
+                        zlib: config.zlib,
+                        transport: config.transport,
+                        chunk_size: config.chunk_size,
+                    },
                 )?;
+                payload_bytes = transfer.payload_bytes;
                 send_barrier(&mut stdout, barrier_id)?;
                 stdout.flush()?;
                 wait_for_response(barrier_id)?;
                 samples.push(start.elapsed());
-                medium = presenter.last_medium;
+                medium = medium_name(Some(transfer.medium));
             }
             let (p50, p90) = percentiles(&mut samples);
             results.push(ResultRow {
@@ -133,24 +135,26 @@ pub fn run(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 for sample in 0..DAMAGE_SAMPLES {
                     let pixels = damage_frame(width, height, sample as u8);
                     let start = Instant::now();
-                    payload_bytes = presenter.transmit_with(
+                    let transfer = transmitter.transmit(
                         &mut stdout,
                         &format!(
-                            "a=f,r=1,i={},f=24,q=2,x={x},y={y},s={width},v={height},X=1",
-                            presenter.image_id
+                            "a=f,r=1,i={image_id},f=24,q=2,x={x},y={y},s={width},v={height},X=1"
                         ),
                         &pixels,
                         true,
-                        config.zlib,
-                        config.transport,
-                        config.chunk_size,
+                        TransferOptions {
+                            zlib: config.zlib,
+                            transport: config.transport,
+                            chunk_size: config.chunk_size,
+                        },
                     )?;
-                    write!(stdout, "\x1b_Ga=a,q=2,c=1,i={};\x1b\\", presenter.image_id)?;
+                    payload_bytes = transfer.payload_bytes;
+                    select_frame(&mut stdout, image_id, 1)?;
                     send_barrier(&mut stdout, barrier_id)?;
                     stdout.flush()?;
                     wait_for_response(barrier_id)?;
                     samples.push(start.elapsed());
-                    medium = presenter.last_medium;
+                    medium = medium_name(Some(transfer.medium));
                 }
                 let (p50, p90) = percentiles(&mut samples);
                 results.push(ResultRow {
@@ -165,7 +169,7 @@ pub fn run(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
                     p90,
                 });
             }
-            delete_kitty_image(&mut stdout, presenter.image_id)?;
+            KittyPresenter::new(image_id, false).delete(&mut stdout)?;
         }
     }
 

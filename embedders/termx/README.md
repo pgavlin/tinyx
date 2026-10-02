@@ -3,13 +3,16 @@
 TermX is a native reference embedder for the public `tinyx.h` API. It exposes
 in-memory TinyX clients through a Unix-domain X11 socket, presents the memory
 framebuffer using the Kitty graphics protocol, and translates terminal keyboard
-and mouse events into TinyX input injection calls. It applies TinyX damage
-rectangles directly to Kitty's root animation frame using raw RGB data. Local
-updates use uncompressed POSIX shared memory, with a temporary-file fallback.
-Remote updates use direct transfer with adaptive zlib compression.
+and mouse events into TinyX input injection calls. TermX converts only damaged
+TinyX pixels into a persistent packed-RGB shadow framebuffer and delegates
+damage planning, Kitty image updates, and payload transport to the
+[`tilcayo`](https://crates.io/crates/tilcayo) crate. Local updates use
+uncompressed POSIX shared memory, with a temporary-file fallback. Remote
+updates use direct transfer with adaptive zlib compression.
 
-The Cargo build invokes the repository's CMake build and statically links
-`libtinyx.a`. X.Org protocol headers must be installed. If they are outside the
+The Cargo build invokes the repository's CMake build, statically links
+`libtinyx.a`, and resolves Tilcayo from crates.io. X.Org protocol headers must
+be installed. If they are outside the
 compiler's default search path, set:
 
 ```sh

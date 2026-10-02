@@ -22,8 +22,8 @@ is itself an interactive host.
 Included embedders:
 
 - [`headless`](headless/README.md) is the smallest native C consumer;
-- [`termx`](termx/README.md) bridges a Unix-domain X11 socket, terminal input,
-  and the Kitty graphics protocol.
+- [`termx`](termx/README.md) bridges a Unix-domain X11 socket and terminal
+  input, and delegates Kitty graphics presentation to the Tilcayo crate.
 
 Future SDL, Cocoa, browser, or application-specific embedders should use the
 same public API rather than adding acquisition or presentation policy to the
