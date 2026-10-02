@@ -84,6 +84,7 @@ typedef struct _WindowOpt {
     RegionPtr		boundingShape;	   /* default: NULL */
     RegionPtr		clipShape;	   /* default: NULL */
     RegionPtr		inputShape;	   /* default: NULL */
+    struct _OtherInputMasks *inputMasks; /* default: NULL */
 } WindowOptRec, *WindowOptPtr;
 
 #define BackgroundPixel	    2L
@@ -153,7 +154,7 @@ extern Mask	    DontPropagateMasks[];
 #define wDontPropagateMask(w)	wUseDefault(w, dontPropagateMask, DontPropagateMasks[(w)->dontPropagate])
 #define wOtherEventMasks(w)	wUseDefault(w, otherEventMasks, 0)
 #define wOtherClients(w)	wUseDefault(w, otherClients, NULL)
-#define wOtherInputMasks(w)	NULL
+#define wOtherInputMasks(w)	wUseDefault(w, inputMasks, NULL)
 #define wPassiveGrabs(w)	wUseDefault(w, passiveGrabs, NULL)
 #define wUserProps(w)		wUseDefault(w, userProps, NULL)
 #define wBackingBitPlanes(w)	wUseDefault(w, backingBitPlanes, ~0L)

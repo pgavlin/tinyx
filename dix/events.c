@@ -3323,6 +3323,7 @@ DeleteWindowFromAnyEvents(WindowPtr pWin, Bool freeResources)
         while ((passive = wPassiveGrabs(pWin)))
             FreeResource(passive->resource, RT_NONE);
     }
+    DeleteWindowFromAnyExtEvents(pWin, freeResources);
 }
 
 /**

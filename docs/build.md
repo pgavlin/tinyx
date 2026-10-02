@@ -34,8 +34,8 @@ This produces:
 
 - `libtinyx.a`, the native static library;
 - `tinyx-embedder-headless`, the minimal headless C embedder;
-- API, configured-visual, byte-order, keyboard-map, font, and retained-client
-  tests when testing is enabled.
+- API, configured-visual, byte-order, keyboard-map, XInput 1.3 protocol, font,
+  and retained-client tests when testing is enabled.
 
 Useful options are:
 
@@ -114,7 +114,8 @@ XF86BIGFONT. Neither target includes Xtrans, native access control,
 authorization, XDMCP, Linux input, fbdev, or VESA. The memory display performs
 no presentation.
 
-CTest runs the same API and protocol tests under Node through Emscripten's
+CTest runs the same API and protocol tests, including native- and
+swapped-byte-order XInput 1.3 coverage, under Node through Emscripten's
 cross-compiling emulator.
 
 ## Generated configuration

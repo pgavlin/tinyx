@@ -55,6 +55,7 @@ SOFTWARE.
 
 #include "misc.h"
 #include "extension.h"
+#include "extinit.h"
 #include "micmap.h"
 #include "globals.h"
 
@@ -200,6 +201,7 @@ InitExtensions(argc, argv)
     int		argc;
     char	*argv[];
 {
+    XInputExtensionInit();
     if (!noShapeExtension) ShapeExtensionInit();
 #ifndef TINYX_NO_MITSHM
     if (!noMITShmExtension) ShmExtensionInit();

@@ -384,6 +384,7 @@ CreateRootWindow(ScreenPtr pScreen)
     pWin->optional->boundingShape = NULL;
     pWin->optional->clipShape = NULL;
     pWin->optional->inputShape = NULL;
+    pWin->optional->inputMasks = NULL;
     pWin->optional->colormap = pScreen->defColormap;
     pWin->optional->visual = pScreen->rootVisual;
 
@@ -3063,6 +3064,8 @@ CheckWindowOptionalNeed(register WindowPtr w)
         return;
     if (optional->inputShape != NULL)
         return;
+    if (optional->inputMasks != NULL)
+        return;
     parentOptional = FindWindowWithOptional(w)->optional;
     if (optional->visual != parentOptional->visual)
         return;
@@ -3103,6 +3106,7 @@ MakeWindowOptional(register WindowPtr pWin)
     optional->boundingShape = NULL;
     optional->clipShape = NULL;
     optional->inputShape = NULL;
+    optional->inputMasks = NULL;
     parentOptional = FindWindowWithOptional(pWin)->optional;
     optional->visual = parentOptional->visual;
     if (!pWin->cursorIsNone) {

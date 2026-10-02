@@ -24,7 +24,7 @@ flowchart TD
     os["`**os/**<br/>stream buffering, readiness, timers, runtime services`"]
     dix["`**dix/ — Device-Independent X**<br/>clients, dispatch, resources, windows, GCs, events, properties, selections, fonts, cursors, lifecycle`"]
     mi["`**mi/ — machine-independent**<br/>geometry, regions, windows, exposure and pointer logic`"]
-    extensions["`**Extensions**<br/>Xext/, render/, randr/, xfixes/, damageext/, dbe/`"]
+    extensions["`**Extensions**<br/>Xext/, Xi/, render/, randr/, xfixes/, damageext/, dbe/`"]
     fb["`**fb/ — software framebuffer rendering**<br/>pixel operations, pixmaps, GCs, glyphs, Render support`"]
     kdrive["`**KDrive memory DDX**<br/>screen setup, cursor, injected input`"]
 
@@ -120,6 +120,7 @@ is already independent of Linux framebuffer devices.
 | `miext/damage/` | Internal drawable damage tracking |
 | `miext/shadow/` | Shadow framebuffer and rotation support |
 | `Xext/` | Traditional protocol extensions such as SHAPE and BIG-REQUESTS |
+| `Xi/` | Legacy X Input Extension 1.3 requests, events, and device classes |
 | `render/` | RENDER extension and software picture composition |
 | `randr/` | RANDR extension |
 | `xfixes/` | XFIXES extension |
@@ -657,9 +658,15 @@ Extensions add requests, events, errors, resources, and often wrappers around
 screen operations.
 
 `mi/miinitext.c` contains TinyX's extension initialization list. During
-startup, `InitExtensions()` calls enabled initializers for SHAPE, MIT-SHM,
-XTEST, BIG-REQUESTS, SYNC, RENDER, RANDR, XFIXES, DAMAGE, and configured
-optional extensions.
+startup, `InitExtensions()` initializes XInput 1.3 and calls enabled
+initializers for SHAPE, MIT-SHM, XTEST, BIG-REQUESTS, SYNC, RENDER, RANDR,
+XFIXES, DAMAGE, and configured optional extensions.
+
+`Xi/` implements the legacy X Input Extension through version 1.3. It exposes
+the core pointer and keyboard in `ListInputDevices`; as specified by XI 1.x,
+those core devices are identified as `IsXPointer` and `IsXKeyboard` and cannot
+be opened as extension devices. TinyX does not dispatch XI 1.5 device-property
+requests or any XI2 requests, so those minor opcodes receive `BadRequest`.
 
 An extension calls `AddExtension()` in `dix/extension.c`, supplying:
 

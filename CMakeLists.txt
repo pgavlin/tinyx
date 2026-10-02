@@ -124,6 +124,7 @@ set(TINYX_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/xfixes"
     "${CMAKE_CURRENT_SOURCE_DIR}/damageext"
     "${CMAKE_CURRENT_SOURCE_DIR}/dbe"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Xi"
     "${CMAKE_CURRENT_SOURCE_DIR}/miext/damage"
     "${CMAKE_CURRENT_SOURCE_DIR}/miext/shadow"
     "${CMAKE_CURRENT_SOURCE_DIR}/kdrive/src"
@@ -158,6 +159,16 @@ set(TINYX_FB_SOURCES
     fb/fbpoint.c fb/fbpush.c fb/fbscreen.c fb/fbseg.c fb/fbsetsp.c
     fb/fbsolid.c fb/fbstipple.c fb/fbtile.c fb/fbtrap.c fb/fbutil.c
     fb/fbwindow.c)
+
+set(TINYX_XI_SOURCES
+    Xi/allowev.c Xi/chgdctl.c Xi/chgfctl.c Xi/chgkbd.c Xi/chgkmap.c
+    Xi/chgprop.c Xi/chgptr.c Xi/closedev.c Xi/devbell.c Xi/exevents.c
+    Xi/extinit.c Xi/getbmap.c Xi/getdctl.c Xi/getfctl.c Xi/getfocus.c
+    Xi/getkmap.c Xi/getmmap.c Xi/getprop.c Xi/getselev.c Xi/getvers.c
+    Xi/grabdev.c Xi/grabdevb.c
+    Xi/grabdevk.c Xi/gtmotion.c Xi/listdev.c Xi/opendev.c Xi/queryst.c
+    Xi/selectev.c Xi/sendexev.c Xi/setbmap.c Xi/setdval.c Xi/setfocus.c
+    Xi/setmmap.c Xi/setmode.c Xi/stubs.c Xi/ungrdev.c Xi/ungrdevb.c Xi/ungrdevk.c)
 
 set(TINYX_EXTENSION_SOURCES
     Xext/bigreq.c Xext/shape.c Xext/sleepuntil.c Xext/sync.c
@@ -199,7 +210,8 @@ set(TINYX_MEMORY_HOST_SOURCES
 
 add_library(tinyx-core OBJECT
     ${TINYX_DIX_SOURCES} ${TINYX_MI_SOURCES} ${TINYX_FB_SOURCES}
-    ${TINYX_EXTENSION_SOURCES} ${TINYX_SHADOW_SOURCES} ${TINYX_OS_SOURCES})
+    ${TINYX_EXTENSION_SOURCES} ${TINYX_XI_SOURCES}
+    ${TINYX_SHADOW_SOURCES} ${TINYX_OS_SOURCES})
 add_library(tinyx-host-memory OBJECT ${TINYX_MEMORY_HOST_SOURCES})
 target_compile_definitions(tinyx-host-memory PRIVATE HAVE_CONFIG_H)
 
@@ -256,6 +268,10 @@ if(TINYX_BUILD_TESTS)
     add_executable(tinyx-keyboard-map-test kdrive/memory/keyboard-map-test.c)
     target_link_libraries(tinyx-keyboard-map-test PRIVATE tinyx)
     add_test(NAME tinyx-keyboard-map COMMAND tinyx-keyboard-map-test)
+
+    add_executable(tinyx-xinput-test kdrive/memory/xinput-test.c)
+    target_link_libraries(tinyx-xinput-test PRIVATE tinyx)
+    add_test(NAME tinyx-xinput COMMAND tinyx-xinput-test)
 
     add_executable(tinyx-font-pattern-test
         kdrive/memory/font-pattern-test.c)
