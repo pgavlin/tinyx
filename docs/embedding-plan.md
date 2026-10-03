@@ -443,14 +443,15 @@ properties into generation-local `FontRec` instances and releases the lease
 on close or failure. The built-in catalog is static today but the materializer
 does not depend on generated symbols or process-lifetime ownership.
 
-`dix/embedded-font-data.c` contains generated ISO10646-1 6x13 and complete
-cursor data. `fonts/generate-builtin-fonts.py` deterministically regenerates it
-from the X.Org BDF releases documented in `fonts/README.md`. The catalog
-supports `fixed`, `6x13`, `cursor`, the canonical ISO10646-1 6x13 XLFD,
-historical 100-dpi and ISO8859-1 aliases, and the complete 4,121-glyph source
-repertoire. Listing, querying, text rendering, and glyph cursor creation use
-the existing DIX and FB paths; unknown names and paths retain X11 error
-semantics.
+`dix/embedded-font-data.c` contains generated ISO10646-1 6x13, complete cursor,
+and selected 100-dpi Helvetica and Lucida Typewriter data.
+`fonts/generate-builtin-fonts.py` deterministically regenerates it from the
+X.Org BDF releases documented in `fonts/README.md`. The catalog supports
+`fixed`, `6x13`, `cursor`, the canonical ISO10646-1 6x13 XLFD, historical
+100-dpi and ISO8859-1 aliases, the complete 4,121-glyph fixed-font repertoire,
+and the ISO-8859-1 core-font patterns used by legacy IRIX Motif clients.
+Listing, querying, text rendering, and glyph cursor creation use the existing
+DIX and FB paths; unknown names and paths retain X11 error semantics.
 
 The CMake products select this runnable backend, default the font path to
 `built-ins`, and link neither libXfont nor libfontenc. CTest validates generated

@@ -97,8 +97,13 @@ The backend exposes these names:
 |---|---|
 | `fixed` | Alias for the embedded 6x13 text font |
 | `6x13` | Alias for the embedded 6x13 text font |
-| `-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1` | Canonical text-font name |
+| `-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1` | Fixed text-font compatibility name |
 | `cursor` | Canonical cursor-font name |
+| `-adobe-helvetica-medium-r-normal--14-100-100-100-p-76-iso8859-1` | 14-pixel regular Helvetica |
+| `-adobe-helvetica-bold-r-normal--14-100-100-100-p-82-iso8859-1` | 14-pixel bold Helvetica |
+| `-adobe-helvetica-bold-o-normal--14-100-100-100-p-82-iso8859-1` | 14-pixel bold oblique Helvetica |
+| `-adobe-helvetica-medium-r-normal--20-140-100-100-p-100-iso8859-1` | 20-pixel regular Helvetica |
+| `-b&h-lucidatypewriter-medium-r-normal-sans-14-100-100-100-m-80-iso8859-1` | 14-pixel Lucida Typewriter |
 
 The existing 100-dpi 6x13 alias used by libXfont's built-ins should also be
 retained for compatibility.
@@ -117,7 +122,9 @@ in a small `fonts/` subdirectory without becoming a public interface.
 Check in generated C data for:
 
 - the complete BMP repertoire of X.Org's 6x13 ISO10646-1 fixed font;
-- the complete X.Org cursor font, including source/mask glyph pairs.
+- the complete X.Org cursor font, including source/mask glyph pairs;
+- the ISO-8859-1 ranges of the X.Org 100-dpi Helvetica and Lucida Typewriter
+  faces required by legacy core-X clients.
 
 Also check in the generator and source provenance so regeneration is
 repeatable, but do not require Python, BDF tools, or font packages to compile

@@ -43,8 +43,17 @@ validateFont(const TinyXDecodedFont *font)
 int
 main(void)
 {
-    size_t i;
-    int foundFixed = 0, foundCursor = 0;
+    static const char *required[] = {
+        "fixed",
+        "cursor",
+        "-adobe-helvetica-medium-r-normal--14-100-100-100-p-76-iso8859-1",
+        "-adobe-helvetica-bold-r-normal--14-100-100-100-p-82-iso8859-1",
+        "-adobe-helvetica-bold-o-normal--14-100-100-100-p-82-iso8859-1",
+        "-adobe-helvetica-medium-r-normal--20-140-100-100-p-100-iso8859-1",
+        "-b&h-lucidatypewriter-medium-r-normal-sans-14-100-100-100-m-80-iso8859-1"
+    };
+    size_t i, j;
+    unsigned int found = 0;
 
     if (!validateFont(&tinyxEmbeddedFixedFont) ||
         !validateFont(&tinyxEmbeddedCursorFont)) {
@@ -62,14 +71,16 @@ main(void)
     for (i = 0; i < tinyxEmbeddedFontNameCount; i++) {
         const TinyXEmbeddedFontName *entry = &tinyxEmbeddedFontNames[i];
 
-        if (!strcmp(entry->name, "fixed") &&
-            entry->font == &tinyxEmbeddedFixedFont)
-            foundFixed = 1;
-        if (!strcmp(entry->name, "cursor") &&
-            entry->font == &tinyxEmbeddedCursorFont)
-            foundCursor = 1;
+        if (!validateFont(entry->font)) {
+            fprintf(stderr, "invalid catalog font %s\n", entry->name);
+            return 1;
+        }
+        for (j = 0; j < sizeof(required) / sizeof(required[0]); j++) {
+            if (!strcmp(entry->name, required[j]))
+                found |= 1U << j;
+        }
     }
-    if (!foundFixed || !foundCursor) {
+    if (found != (1U << (sizeof(required) / sizeof(required[0]))) - 1) {
         fprintf(stderr, "missing required embedded font names\n");
         return 1;
     }

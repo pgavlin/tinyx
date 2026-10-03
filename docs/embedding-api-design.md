@@ -290,9 +290,10 @@ The v1 lifetime rules are:
 - after poisoning, destruction performs best-effort facade cleanup, but the
   process-global core cannot be reused.
 
-The embedded `fixed` and `cursor` font catalog is used. API v1 does not expose
-a font provider. The internal catalog and lease seam remains available for a
-future API addition.
+The embedded core-font catalog is used. It guarantees `fixed` and `cursor` and
+also includes a small set of 100-dpi Helvetica and Lucida Typewriter bitmap
+faces for legacy clients. API v1 does not expose a font provider. The internal
+catalog and lease seam remains available for a future API addition.
 
 ### Cooperative execution
 
